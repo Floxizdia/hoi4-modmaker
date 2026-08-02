@@ -1,0 +1,7 @@
+dist/
+build/
+*.spec
+.stage*-smoke-build/
+.stage*-smoke-dist/
+__pycache__/
+*.pyc
