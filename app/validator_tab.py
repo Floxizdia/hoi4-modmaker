@@ -3,6 +3,7 @@ severity, with the file each one lives in."""
 
 import os
 import re
+import threading
 import tkinter as tk
 from tkinter import ttk, messagebox
 
@@ -17,6 +18,7 @@ class ValidatorTab(ttk.Frame):
     def __init__(self, master):
         super().__init__(master, padding=12)
         self.issues = []
+        self._scan_running = False
         self._build()
         state.subscribe(self.on_mod_changed)
 
@@ -27,8 +29,10 @@ class ValidatorTab(ttk.Frame):
 
         top = ttk.Frame(self)
         top.pack(fill="x")
-        ttk.Button(top, text="Run Validation", style="Accent.TButton", command=self._run).pack(side="left")
-        ttk.Button(top, text="Find Unused Content", command=self._find_orphans).pack(side="left", padx=6)
+        self.run_btn = ttk.Button(top, text="Run Validation", style="Accent.TButton", command=self._run)
+        self.run_btn.pack(side="left")
+        self.orphans_btn = ttk.Button(top, text="Find Unused Content", command=self._find_orphans)
+        self.orphans_btn.pack(side="left", padx=6)
         ttk.Label(top, text="   Show:").pack(side="left")
         self.filter_var = tk.StringVar(value="all")
         for value, label in (("all", "all"), ("error", "errors"), ("warning", "warnings"), ("info", "info")):
@@ -71,18 +75,59 @@ class ValidatorTab(ttk.Frame):
         self._refresh()
 
     def _run(self):
+        """Runs the scan on a worker thread instead of the UI thread.
+
+        validate() takes 15-20+ seconds on a real multi-hundred-file mod;
+        run inline, that stretch left the window unresponsive between the
+        eight coarse progress checkpoints, which Windows reports as "Not
+        Responding" - read by users as "Validate hung." Worse, since the
+        packaged build has no console, an unhandled exception mid-scan used
+        to vanish silently, leaving "Scanning..." on screen forever with no
+        way to tell a slow scan from a dead one. Both are fixed by moving
+        the call off the UI thread and reporting failures explicitly."""
         if not state.is_loaded:
             messagebox.showerror("No mod", "Open a mod first.")
             return
+        if self._scan_running:
+            return
+
+        self._scan_running = True
+        self.run_btn.state(["disabled"])
+        self.orphans_btn.state(["disabled"])
         self.summary.config(text="Scanning...")
-        self.update_idletasks()
 
         loc = dict(state.mod_loc)
         loc.update(state.loc_entries)
-        self.issues = validator.validate(
-            state.mod_root, loc, state.gfx_index,
-            progress=lambda m: (self.summary.config(text=m), self.update_idletasks()),
-        )
+        mod_root, gfx_index = state.mod_root, state.gfx_index
+
+        def report(msg):
+            self.after(0, lambda: self._apply_progress(msg))
+
+        def work():
+            try:
+                issues = validator.validate(mod_root, loc, gfx_index, progress=report)
+            except Exception as exc:
+                self.after(0, lambda: self._apply_run_error(exc))
+                return
+            self.after(0, lambda: self._apply_run_result(issues))
+
+        threading.Thread(target=work, daemon=True).start()
+
+    def _apply_progress(self, msg):
+        if self._scan_running and self.summary.winfo_exists():
+            self.summary.config(text=msg)
+
+    def _apply_run_error(self, exc):
+        self._scan_running = False
+        self.run_btn.state(["!disabled"])
+        self.orphans_btn.state(["!disabled"])
+        self.summary.config(text=f"Validation failed: {exc}")
+
+    def _apply_run_result(self, issues):
+        self._scan_running = False
+        self.run_btn.state(["!disabled"])
+        self.orphans_btn.state(["!disabled"])
+        self.issues = issues
         counts = validator.summarise(self.issues)
         self.summary.config(
             text=f"{counts.get('error', 0)} errors · {counts.get('warning', 0)} warnings · "
@@ -103,19 +148,48 @@ class ValidatorTab(ttk.Frame):
     def _find_orphans(self):
         """Content nothing reaches. Separate from Validate proper because
         it's a judgement call, not a defect - unreferenced isn't the same as
-        broken, so it doesn't belong in the errors/warnings list."""
+        broken, so it doesn't belong in the errors/warnings list. Same
+        worker-thread + explicit-failure treatment as _run(), for the same
+        reason: this walks every script file too."""
         if not state.is_loaded:
             messagebox.showerror("No mod", "Open a mod first.")
             return
+        if self._scan_running:
+            return
+
+        self._scan_running = True
+        self.run_btn.state(["disabled"])
+        self.orphans_btn.state(["disabled"])
         self.summary.config(text="Looking for unreferenced content...")
-        self.update_idletasks()
-        from app import references
-        orphans = references.find_orphans(
-            state.mod_root,
-            progress=lambda m: (self.summary.config(text=m), self.update_idletasks()),
-        )
+        mod_root = state.mod_root
+
+        def report(msg):
+            self.after(0, lambda: self._apply_progress(msg))
+
+        def work():
+            from app import references
+            try:
+                orphans = references.find_orphans(mod_root, progress=report)
+            except Exception as exc:
+                self.after(0, lambda: self._apply_orphans_error(exc))
+                return
+            self.after(0, lambda: self._apply_orphans_result(orphans))
+
+        threading.Thread(target=work, daemon=True).start()
+
+    def _apply_orphans_error(self, exc):
+        self._scan_running = False
+        self.run_btn.state(["!disabled"])
+        self.orphans_btn.state(["!disabled"])
+        self.summary.config(text=f"Unused-content scan failed: {exc}")
+
+    def _apply_orphans_result(self, orphans):
+        self._scan_running = False
+        self.run_btn.state(["!disabled"])
+        self.orphans_btn.state(["!disabled"])
         self.summary.config(text="")
-        OrphanDialog(self, orphans)
+        if self.winfo_exists():
+            OrphanDialog(self, orphans)
 
     def _open_in_code(self):
         """Jump to the offending file in the Code tab. Several findings put

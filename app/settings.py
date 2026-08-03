@@ -6,7 +6,7 @@ import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
 
 from app.state import state
-from app import theme, ui_kit
+from app import mod_export, theme, ui_kit
 
 DESCRIPTOR_TEMPLATE = """version="1.0.0"
 tags={{
@@ -15,6 +15,37 @@ tags={{
 name="{name}"
 supported_version="1.16.*"
 """
+
+
+def scaffold_status(root, user_mod_dir):
+    """Status text for the scaffold button, given the folder just scaffolded
+    and (if found) the game's own mod directory (Documents/Paradox
+    Interactive/Hearts of Iron IV/mod).
+
+    Scaffolding only writes descriptor.mod + the folder structure - it does
+    not create the separate <name>.mod launcher-entry file, since a folder
+    already living under the game's mod directory may already have one (or
+    the user is about to make one via Export). But that means the Paradox
+    Launcher won't list this mod at all until it's actually inside that
+    directory, and that gap is invisible unless the status line says so.
+    """
+    mod_dir = os.path.join(user_mod_dir, "mod") if user_mod_dir else None
+    inside_mod_dir = mod_dir and os.path.normcase(os.path.abspath(root)).startswith(
+        os.path.normcase(os.path.abspath(mod_dir)) + os.sep)
+
+    if inside_mod_dir:
+        return (
+            f"Mod scaffold ready at {root}. "
+            "It should now show up in the Paradox Launcher's mod list - if the "
+            "Launcher was already open, close and reopen it (or use its own "
+            "refresh) to see it."
+        )
+    return (
+        f"Mod scaffold ready at {root} - but this folder is outside your HOI4 "
+        f"mod folder ({mod_dir or 'not found - is HOI4 installed?'}), so the "
+        "Paradox Launcher will not list it. Move it there, or use \"Create a new "
+        "mod\" from the Home screen instead, which sets this up for you."
+    )
 
 
 class SettingsTab(ttk.Frame):
@@ -276,7 +307,8 @@ class SettingsTab(ttk.Frame):
         with open(state.path("descriptor.mod"), "w", encoding="utf-8") as f:
             f.write(descriptor)
 
-        self.status.config(text=f"Mod scaffold ready at {root}")
+        user_dir = mod_export.find_user_dir()
+        self.status.config(text=scaffold_status(root, user_dir))
 
 
 class _ChangelogDialog(tk.Toplevel):

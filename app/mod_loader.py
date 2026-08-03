@@ -160,7 +160,7 @@ def build_gfx_index(mod_roots):
     return index
 
 
-_LOC_LINE_RE = re.compile(r'^\s*([A-Za-z0-9_.\-]+)\s*:\s*\d*\s*"(.*)"\s*$')
+_LOC_LINE_RE = re.compile(r'^\s*([A-Za-z0-9_.\-]+)\s*:\s*\d*\s*"(.*)"\s*(?:#.*)?$')
 
 
 def load_localisation(mod_root, language="english"):

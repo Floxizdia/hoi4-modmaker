@@ -10,6 +10,7 @@ id, which is how HOI4 lets multiple files extend one tree.
 """
 
 import os
+import threading
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
 
@@ -300,6 +301,25 @@ class CopyBranchDialog(tk.Toplevel):
         self.destroy()
 
 
+def _folder_size(path):
+    total = 0
+    for dirpath, _dirs, files in os.walk(path):
+        for name in files:
+            try:
+                total += os.path.getsize(os.path.join(dirpath, name))
+            except OSError:
+                pass
+    return total
+
+
+def _fmt_size(num_bytes):
+    if num_bytes >= 1024 ** 3:
+        return f"{num_bytes / 1024 ** 3:.1f} GB"
+    if num_bytes >= 1024 ** 2:
+        return f"{num_bytes / 1024 ** 2:.0f} MB"
+    return f"{num_bytes / 1024:.0f} KB"
+
+
 class PlayExportDialog(tk.Toplevel):
     """Write the edits somewhere the HOI4 launcher will pick them up."""
 
@@ -311,17 +331,24 @@ class PlayExportDialog(tk.Toplevel):
         self.own_files = own_files
         self._build()
         self.grab_set()
+        self._measure_copy_size()
 
     def _build(self):
         source_name = os.path.basename(self.mod_root)
-        ttk.Label(self, text="Mod name shown in the launcher").grid(row=0, column=0, sticky="w", padx=10, pady=6)
+        ttk.Label(
+            self,
+            text="This writes straight to your HOI4 mod folder so you can launch it - no "
+                 "Steam Workshop upload needed. Workshop is only for sharing the mod publicly.",
+            foreground="#888", wraplength=520, justify="left",
+        ).grid(row=0, column=0, columnspan=2, sticky="w", padx=10, pady=(10, 0))
+        ttk.Label(self, text="Mod name shown in the launcher").grid(row=1, column=0, sticky="w", padx=10, pady=6)
         self.name_var = tk.StringVar(value=f"{source_name} - My Edits")
-        ttk.Entry(self, textvariable=self.name_var, width=46).grid(row=0, column=1, padx=10, pady=6)
+        ttk.Entry(self, textvariable=self.name_var, width=46).grid(row=1, column=1, padx=10, pady=6)
 
-        ttk.Label(self, text="What to export").grid(row=1, column=0, sticky="nw", padx=10, pady=6)
+        ttk.Label(self, text="What to export").grid(row=2, column=0, sticky="nw", padx=10, pady=6)
         self.mode = tk.StringVar(value="submod")
         box = ttk.Frame(self)
-        box.grid(row=1, column=1, sticky="w", padx=10, pady=6)
+        box.grid(row=2, column=1, sticky="w", padx=10, pady=6)
         ttk.Radiobutton(
             box, text=f"Submod — only your {len(self.own_files)} own files (recommended)",
             variable=self.mode, value="submod",
@@ -336,28 +363,58 @@ class PlayExportDialog(tk.Toplevel):
             box, text="Full copy — duplicate the entire mod with your edits baked in",
             variable=self.mode, value="copy",
         ).pack(anchor="w")
-        ttk.Label(
+        self.copy_size_label = ttk.Label(
             box,
-            text="Self-contained, but source mods run close to a gigabyte and it will not\n"
-                 "receive Workshop updates. Enable only this one in the launcher.",
+            text="Self-contained, but this duplicates every file in the source mod "
+                 "(measuring size...) and it will not\nreceive Workshop updates. Enable only "
+                 "this one in the launcher.",
             foreground="#888", justify="left",
-        ).pack(anchor="w", padx=22)
+        )
+        self.copy_size_label.pack(anchor="w", padx=22)
 
         user_dir = mod_export.find_user_dir()
         ttk.Label(
             self,
             text=f"Destination: {os.path.join(user_dir, 'mod') if user_dir else 'HOI4 user folder NOT FOUND'}",
             foreground="#888" if user_dir else "#c05050", wraplength=520, justify="left",
-        ).grid(row=2, column=0, columnspan=2, sticky="w", padx=10, pady=(4, 0))
+        ).grid(row=3, column=0, columnspan=2, sticky="w", padx=10, pady=(4, 0))
 
         self.status = ttk.Label(self, text="", foreground="#2a7a2a", wraplength=520, justify="left")
-        self.status.grid(row=3, column=0, columnspan=2, sticky="w", padx=10, pady=6)
+        self.status.grid(row=4, column=0, columnspan=2, sticky="w", padx=10, pady=6)
 
         btns = ttk.Frame(self)
-        btns.grid(row=4, column=0, columnspan=2, pady=10)
+        btns.grid(row=5, column=0, columnspan=2, pady=10)
         self.export_btn = ttk.Button(btns, text="Export", command=self._export)
         self.export_btn.pack(side="left", padx=4)
         ttk.Button(btns, text="Close", command=self.destroy).pack(side="left", padx=4)
+
+        self._size_measured = None
+
+    def _measure_copy_size(self):
+        """Walking the whole source mod to size it is exactly the kind of
+        filesystem scan that shouldn't happen on the UI thread - do it in
+        the background and fill in the real number once it's known, so the
+        warning says "this will copy 1.8 GB" instead of a vague guess."""
+        mod_root = self.mod_root
+
+        def work():
+            try:
+                nbytes = _folder_size(mod_root)
+            except OSError:
+                return
+            self.after(0, lambda: self._apply_copy_size(nbytes))
+
+        threading.Thread(target=work, daemon=True).start()
+
+    def _apply_copy_size(self, nbytes):
+        if not self.copy_size_label.winfo_exists():
+            return
+        self._size_measured = f"~{_fmt_size(nbytes)}"
+        self.copy_size_label.config(
+            text=f"Self-contained, but this duplicates every file in the source mod "
+                 f"({self._size_measured}) and it will not\n"
+                 "receive Workshop updates. Enable only this one in the launcher."
+        )
 
     def _export(self):
         name = self.name_var.get().strip()
@@ -375,10 +432,11 @@ class PlayExportDialog(tk.Toplevel):
             return
 
         if mode == "copy":
+            size_note = (self._size_measured or "size still being measured")
             if not messagebox.askyesno(
                 "Copy the whole mod?",
-                "This duplicates every file in the mod, which can be around a gigabyte "
-                "and take a few minutes.\n\nContinue?",
+                f"This duplicates every file in the mod ({size_note}), "
+                "which can take a few minutes.\n\nContinue?",
             ):
                 return
 
@@ -401,7 +459,8 @@ class PlayExportDialog(tk.Toplevel):
         self.status.config(
             text=f"Done — {copied} files written to {dest}\n"
                  f"Descriptor: {os.path.basename(mod_file)}\n"
-                 f"Restart the HOI4 launcher to see it. {order}",
+                 "If the Paradox Launcher was already open, close and reopen it (or use its "
+                 f"own refresh) to see this mod. No Workshop upload needed. {order}",
             foreground="#2a7a2a",
         )
         self.export_btn.state(["!disabled"])
