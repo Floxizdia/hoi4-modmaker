@@ -185,7 +185,11 @@ class SettingsTab(ttk.Frame):
             return
         self.status.config(text="Creating snapshot...")
         self.update_idletasks()
-        path, count = snapshots.create(state.mod_root, self.snap_note.get())
+        try:
+            path, count = snapshots.create(state.mod_root, self.snap_note.get())
+        except OSError as exc:
+            self.status.config(text=f"Snapshot failed: {exc}")
+            return
         self._snap_refresh()
         self.status.config(text=f"Snapshot saved: {count} script files -> {os.path.basename(path)}")
 
@@ -202,7 +206,14 @@ class SettingsTab(ttk.Frame):
             "snapshot's versions. Taking a fresh snapshot first is recommended.",
         ):
             return
-        count = snapshots.restore(state.mod_root, path)
+        try:
+            count = snapshots.restore(state.mod_root, path)
+        except OSError as exc:
+            self.status.config(text=f"Restore failed partway through: {exc}. "
+                                     "Some files may already have been overwritten - "
+                                     "take a new snapshot to check the mod's current state.")
+            state._notify()
+            return
         state._notify()
         self.status.config(text=f"Restored {count} files from {label}.")
 

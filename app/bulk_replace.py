@@ -182,9 +182,16 @@ class BulkReplaceTab(ttk.Frame):
             f"Replace {total} match(es) across {len(self._matches)} file(s)?\n\n"
             "Each changed file gets a one-time .bak backup first."):
             return
-        changed, count = replace_in_files(
-            list(self._matches), self.find_var.get(), self.replace_var.get(),
-            regex=self.regex_var.get(), case_sensitive=self.case_var.get())
+        try:
+            changed, count = replace_in_files(
+                list(self._matches), self.find_var.get(), self.replace_var.get(),
+                regex=self.regex_var.get(), case_sensitive=self.case_var.get())
+        except re.error as exc:
+            # Find already validated the search pattern; this is the
+            # replacement side - e.g. a regex backreference like \1 that
+            # doesn't correspond to a capture group in the pattern.
+            self.status.config(text=f"Replacement text isn't valid for this pattern: {exc}")
+            return
         self.status.config(text=f"Replaced {count} match(es) in {changed} file(s).")
         self._find()   # refresh counts (should now be zero unless the pattern self-matches)
 

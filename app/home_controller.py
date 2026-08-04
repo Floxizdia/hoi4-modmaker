@@ -9,6 +9,7 @@ home_view.py and the widget modules should only need edits for layout.
 
 import os
 import shutil
+import threading
 
 from tkinter import filedialog
 
@@ -76,6 +77,9 @@ class HomeController:
     # ---- mod actions ----
 
     def duplicate_mod(self, mod):
+        """Copies the whole mod folder on a worker thread - for a large mod
+        (GB+ of textures) a synchronous shutil.copytree freezes the window
+        for as long as the copy takes, which reads as a hang."""
         src = mod["path"]
         base = src.rstrip("\\/") + " (copy)"
         dest = base
@@ -83,11 +87,23 @@ class HomeController:
         while os.path.exists(dest):
             dest = f"{base} {n}"
             n += 1
-        try:
-            shutil.copytree(src, dest)
-        except OSError as exc:
-            self.view.table.hint.config(text=f"Couldn't duplicate: {exc}")
-            return
+
+        self.view.table.hint.config(text=f"Duplicating {os.path.basename(src)}...")
+
+        def work():
+            try:
+                shutil.copytree(src, dest)
+            except OSError as exc:
+                self.root.after(0, lambda: self._apply_duplicate_error(exc))
+                return
+            self.root.after(0, lambda: self._apply_duplicate_done(dest))
+
+        threading.Thread(target=work, daemon=True).start()
+
+    def _apply_duplicate_error(self, exc):
+        self.view.table.hint.config(text=f"Couldn't duplicate: {exc}")
+
+    def _apply_duplicate_done(self, dest):
         local_mods.add(dest)
         self.refresh()
         self.view.table.hint.config(text=f"Duplicated to {os.path.basename(dest)}")

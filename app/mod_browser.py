@@ -442,18 +442,33 @@ class PlayExportDialog(tk.Toplevel):
 
         self.export_btn.state(["disabled"])
         self.status.config(text="Exporting...")
-        self.update_idletasks()
 
-        try:
-            dest, mod_file, copied = mod_export.export(
-                self.mod_root, name, mode=mode, own_files=self.own_files,
-                progress=lambda msg: (self.status.config(text=msg), self.update_idletasks()),
-            )
-        except Exception as exc:
-            self.status.config(text=f"Failed: {exc}", foreground="#c05050")
-            self.export_btn.state(["!disabled"])
+        mod_root, own_files = self.mod_root, self.own_files
+
+        def report(msg):
+            self.after(0, lambda: self.status.winfo_exists() and self.status.config(text=msg))
+
+        def work():
+            try:
+                dest, mod_file, copied = mod_export.export(
+                    mod_root, name, mode=mode, own_files=own_files, progress=report,
+                )
+            except Exception as exc:
+                self.after(0, lambda: self._apply_export_error(exc))
+                return
+            self.after(0, lambda: self._apply_export_done(dest, mod_file, copied, mode))
+
+        threading.Thread(target=work, daemon=True).start()
+
+    def _apply_export_error(self, exc):
+        if not self.status.winfo_exists():
             return
+        self.status.config(text=f"Failed: {exc}", foreground="#c05050")
+        self.export_btn.state(["!disabled"])
 
+    def _apply_export_done(self, dest, mod_file, copied, mode):
+        if not self.status.winfo_exists():
+            return
         order = ("Enable the original mod first, then this one." if mode == "submod"
                  else "Enable only this mod (not the original).")
         self.status.config(

@@ -10,7 +10,7 @@ import shutil
 
 from app import undo
 
-_KEY_RE_TEMPLATE = r'(^[ \t]*{key}[ \t]*:[ \t]*\d*[ \t]*")(.*?)("[ \t]*$)'
+_KEY_RE_TEMPLATE = r'(^[ \t]*{key}[ \t]*:[ \t]*\d*[ \t]*")(.*?)("[ \t]*(?:#.*)?$)'
 
 
 def set_key(mod_root, key, new_text, fallback_filename="zzz_focus_overrides_l_english.yml"):
