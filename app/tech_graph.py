@@ -23,6 +23,36 @@ from app import pds_scan as scan
 _LEADS_TO_RE = re.compile(r"\bleads_to_tech\s*=\s*(\S+)")
 _COUNTRY_TAG_RE = re.compile(r"^([A-Z]{3})\b")
 _TECH_ASSIGNMENT_RE = re.compile(r"(?m)^\s*([A-Za-z_@][\w@]*)\s*=\s*(\d+)\s*$")
+_CONST_RE = re.compile(r"(?m)^\s*(@\w+)\s*=\s*(-?[\d.]+)\s*$")
+
+#: bucket for techs that declare no folder - the game doesn't put these on
+#: the research screen either, they're granted by script at gamestart
+NO_FOLDER = "(no folder)"
+
+
+def _constants(text):
+    """{'@1936': 2.0, ...} - the scripted-variable block vanilla puts at the
+    top of a technologies file and then uses for row positions
+    (`position = { x = 0 y = @1936 }`). Without these the y of every
+    year-gated tech reads as the literal string '@1936', collapses to 0, and
+    a whole folder stacks onto one cell."""
+    out = {}
+    for name, value in _CONST_RE.findall(text):
+        try:
+            out[name] = float(value)
+        except ValueError:
+            continue
+    return out
+
+
+def _number(raw, consts, default=0.0):
+    raw = (raw or "").strip()
+    if raw in consts:
+        return consts[raw]
+    try:
+        return float(raw)
+    except ValueError:
+        return default
 
 
 def find_tech_files(mod_root):
@@ -65,16 +95,14 @@ def parse_techs(path):
     return text, techs
 
 
-def _tech_fields(inner):
+def _tech_fields(inner, consts=None):
+    consts = consts or {}
     folder_block = scan.first_block(inner, "folder") or ""
     name = scan.scalar(folder_block, "name", "")
     pos = scan.first_block(folder_block, "position") or ""
-    x = scan.scalar(pos, "x", "0")
-    y = scan.scalar(pos, "y", "0")
-    try:
-        x, y = float(x), float(y)
-    except ValueError:
-        x, y = 0.0, 0.0
+    x = _number(scan.scalar(pos, "x", "0"), consts)
+    y = _number(scan.scalar(pos, "y", "0"), consts)
+    positioned = bool(folder_block and pos)
 
     leads_to = []
     for _, _, path_inner in scan.iter_blocks(inner, "path"):
@@ -86,6 +114,10 @@ def _tech_fields(inner):
         "folder": name,
         "x": x,
         "y": y,
+        "positioned": positioned,
+        "doctrine": scan.scalar(inner, "doctrine", "") == "yes",
+        "xp_cost": scan.scalar(inner, "xp_unlock_cost", ""),
+        "xp_type": scan.scalar(inner, "xp_research_type", ""),
         "leads_to": leads_to,
         "research_cost": scan.scalar(inner, "research_cost", ""),
         "start_year": scan.scalar(inner, "start_year", ""),
@@ -108,9 +140,10 @@ def build_graph(mod_root):
     for root, is_vanilla in ((BASE_GAME, True), (mod_root, False)):
         for path in find_tech_files(root):
             text, spans = parse_techs(path)
+            consts = _constants(text)
             for tech_id, start, end in spans:
                 inner = text[start:end]
-                fields = _tech_fields(inner)
+                fields = _tech_fields(inner, consts)
                 fields.update({"file": path, "start": start, "end": end,
                               "requires": [], "is_vanilla": is_vanilla})
                 techs[tech_id] = fields   # the mod's own definition wins on id collision
@@ -123,22 +156,54 @@ def build_graph(mod_root):
     return techs
 
 
+def is_doctrine_folder(graph, folder):
+    """Whether a folder holds doctrines rather than ordinary research.
+
+    Decided from the `doctrine = yes` marker the techs themselves carry -
+    every tech in vanilla's four doctrine folders has it - rather than from
+    the folder's name, so a mod that calls its own doctrine folder
+    something else is still classified correctly."""
+    techs = [info for info in graph.values()
+             if (info["folder"] or NO_FOLDER) == folder]
+    if not techs:
+        return False
+    return sum(1 for info in techs if info.get("doctrine")) > len(techs) / 2
+
+
 def folders(graph):
     """Folder names in a stable order: first-seen across the (sorted) tech
     ids, so the tab order doesn't reshuffle between scans."""
     seen = []
     for tech_id in sorted(graph):
-        name = graph[tech_id]["folder"] or "(no folder)"
+        name = graph[tech_id]["folder"] or NO_FOLDER
         if name not in seen:
             seen.append(name)
     return seen
 
 
-def resolve_icon(mod_root, tech_id):
-    """gfx/interface/technologies/<id>.dds - mod's own art first, else the
-    base game's. Unlike focuses, base-game techs need no gfx-index lookup:
-    the file is simply named after the tech id."""
+def resolve_icon(mod_root, tech_id, gfx_index=None, tag=None):
+    """The texture the game itself would draw for this tech.
+
+    The game reaches a tech's art through a sprite name, not a filename:
+    interface/*.gfx defines `GFX_<id>_medium` pointing at whatever texture
+    it likes (`GFX_early_ship_hull_light_medium` -> early_destroyer.dds),
+    and country-flavoured techs only exist as `GFX_<TAG>_<id>_medium` with
+    no generic variant at all. Guessing `technologies/<id>.dds` therefore
+    misses roughly 40% of the base game's techs, so the sprite index is
+    tried first and the filename convention kept only as a fallback for
+    mods that ship loose art without registering a sprite."""
     from app.map_data import BASE_GAME
+
+    if gfx_index:
+        names = []
+        if tag:
+            names += [f"GFX_{tag}_{tech_id}_medium", f"GFX_{tag}_{tech_id}"]
+        names += [f"GFX_{tech_id}_medium", f"GFX_{tech_id}"]
+        for name in names:
+            path = gfx_index.get(name)
+            if path and os.path.isfile(path):
+                return path
+
     for root in (mod_root, BASE_GAME):
         for ext in (".dds", ".png", ".tga"):
             path = os.path.join(root, "gfx", "interface", "technologies", tech_id + ext)

@@ -7,6 +7,7 @@ from tkinter import ttk, filedialog, messagebox
 
 from app.state import state
 from app import mod_export, theme, ui_kit
+from app import game_paths
 
 DESCRIPTOR_TEMPLATE = """version="1.0.0"
 tags={{
@@ -137,15 +138,100 @@ class SettingsTab(ttk.Frame):
         ttk.Entry(auto_row, textvariable=self.auto_snap_minutes, width=4).pack(side="left", padx=4)
         ttk.Label(auto_row, text="minutes (keeps the last 8)").pack(side="left")
 
-        # ---- help ----
+        # ---- game folders ----
         ttk.Separator(body).grid(row=16, column=0, columnspan=3, sticky="we", pady=14)
-        ttk.Label(body, text="Help", font=("Segoe UI", 11, "bold")).grid(
+        ttk.Label(body, text="Game folders", font=("Segoe UI", 11, "bold")).grid(
             row=17, column=0, columnspan=3, sticky="w")
+        ttk.Label(
+            body,
+            text="Found automatically from your Steam libraries. Set them by hand if the game "
+                 "lives somewhere the search can't reach - another drive, a non-Steam copy, or "
+                 "a Windows install being edited from Linux.",
+            foreground="#888", wraplength=620, justify="left",
+        ).grid(row=18, column=0, columnspan=3, sticky="w", pady=(2, 6))
+
+        ttk.Label(body, text="HOI4 game folder").grid(row=19, column=0, sticky="w")
+        self.base_game_var = tk.StringVar()
+        ttk.Entry(body, textvariable=self.base_game_var, width=40).grid(
+            row=19, column=1, sticky="we", padx=6)
+        ttk.Button(body, text="Browse...",
+                   command=lambda: self._browse_game_dir(self.base_game_var,
+                                                         "Select the Hearts of Iron IV folder")
+                   ).grid(row=19, column=2)
+
+        ttk.Label(body, text="Workshop folder").grid(row=20, column=0, sticky="w", pady=(6, 0))
+        self.workshop_var = tk.StringVar()
+        ttk.Entry(body, textvariable=self.workshop_var, width=40).grid(
+            row=20, column=1, sticky="we", padx=6, pady=(6, 0))
+        ttk.Button(body, text="Browse...",
+                   command=lambda: self._browse_game_dir(self.workshop_var,
+                                                         "Select the Workshop content folder")
+                   ).grid(row=20, column=2, pady=(6, 0))
+
+        paths_row = ttk.Frame(body)
+        paths_row.grid(row=21, column=0, columnspan=3, sticky="w", pady=(8, 0))
+        ttk.Button(paths_row, text="Save Folders", style="Accent.TButton",
+                   command=self._save_game_paths).pack(side="left")
+        ttk.Button(paths_row, text="Detect Again",
+                   command=self._detect_game_paths).pack(side="left", padx=6)
+        self.paths_status = ttk.Label(body, text="", foreground="#888",
+                                      wraplength=620, justify="left")
+        self.paths_status.grid(row=22, column=0, columnspan=3, sticky="w", pady=(6, 0))
+
+        # ---- help ----
+        ttk.Separator(body).grid(row=23, column=0, columnspan=3, sticky="we", pady=14)
+        ttk.Label(body, text="Help", font=("Segoe UI", 11, "bold")).grid(
+            row=24, column=0, columnspan=3, sticky="w")
         ttk.Button(body, text="Show Tour Again", command=self._show_tour).grid(
-            row=18, column=0, sticky="w", pady=(4, 0))
+            row=25, column=0, sticky="w", pady=(4, 0))
 
         body.columnconfigure(1, weight=1)
+        self._load_game_paths()
         self.refresh()
+
+    # ---- game folders ----
+
+    def _load_game_paths(self):
+        self.base_game_var.set(game_paths.find_base_game())
+        self.workshop_var.set(game_paths.find_workshop())
+        self._describe_game_paths()
+
+    def _describe_game_paths(self):
+        missing = [label for label, value in (("game", self.base_game_var.get()),
+                                              ("Workshop", self.workshop_var.get()))
+                   if not value or not os.path.isdir(value)]
+        if missing:
+            self.paths_status.config(
+                text="Not found: " + ", ".join(missing) +
+                     ". Most screens need the game folder to show vanilla content.")
+        else:
+            self.paths_status.config(text="Both folders found.")
+
+    def _browse_game_dir(self, var, title):
+        path = filedialog.askdirectory(title=title, initialdir=var.get() or None)
+        if path:
+            var.set(path)
+            self._describe_game_paths()
+
+    def _detect_game_paths(self):
+        """Re-run the search, ignoring anything pinned earlier."""
+        game_paths.save_pinned(base_game="", workshop="")
+        self._load_game_paths()
+
+    def _save_game_paths(self):
+        """Paths are read into module-level constants when each screen is
+        first imported, so a change only takes hold on the next run - say so
+        rather than leaving half the app pointing at the old folder."""
+        base = self.base_game_var.get().strip()
+        workshop = self.workshop_var.get().strip()
+        for label, value in (("game", base), ("Workshop", workshop)):
+            if value and not os.path.isdir(value):
+                messagebox.showerror("No such folder",
+                                     f"That {label} folder doesn't exist:\n{value}")
+                return
+        game_paths.save_pinned(base_game=base, workshop=workshop)
+        self.paths_status.config(
+            text="Saved. Restart HOI4 Mod Maker for the new folders to take effect everywhere.")
 
     def _show_tour(self):
         from app import onboarding

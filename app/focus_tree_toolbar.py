@@ -98,6 +98,15 @@ class FocusTreeToolbar(ttk.Frame):
         )
         self.layout_mode.trace_add("write", lambda *_args: on_layout_changed())
         self._separator(tools)
+        # Whole focus branches are gated on expansions with
+        # `allow_branch = { has_dlc = ... }`, so editing a tree without an
+        # expansion means seeing what that player actually gets.
+        self.dlc_button = ttk.Menubutton(tools, text="DLC", width=10,
+                                         style="FocusTree.Ghost.TButton")
+        self.dlc_menu = tk.Menu(self.dlc_button, tearoff=False)
+        self.dlc_button["menu"] = self.dlc_menu
+        self.dlc_button.pack(side="left", padx=4)
+        self._separator(tools)
         ttk.Button(tools, text="-", width=3, style="FocusTree.Ghost.TButton",
                    command=lambda: on_zoom(1 / 1.25)).pack(side="left")
         ttk.Button(tools, text="100%", width=5, style="FocusTree.Ghost.TButton",

@@ -37,15 +37,30 @@ EVENT_REF_RE = re.compile(r"\b(?:country_event|news_event|state_event)\s*=\s*\{[
 SIMPLE_EVENT_REF_RE = re.compile(r"\b(?:country_event|news_event|state_event)\s*=\s*([A-Za-z_][A-Za-z0-9_]*\.\d+)")
 
 
+#: the only characters that change depth, quote state, comment state or the
+#: line number - everything between two of them can be skipped wholesale
+_BALANCE_SCAN_RE = re.compile(r'[\n{}"\\#]')
+
+
 def _brace_balance(text):
-    """Return (depth_at_end, line_of_first_negative). Respects quotes."""
+    """Return (depth_at_end, line_of_first_negative). Respects quotes.
+
+    Jumps between the characters that matter rather than stepping over
+    every one; this runs over every script file in the mod, and the
+    character walk it replaces was the second-largest cost in a full
+    validation."""
     depth = 0
     first_neg = None
     line = 1
     in_quotes = False
     i = 0
     n = len(text)
+    search = _BALANCE_SCAN_RE.search
     while i < n:
+        match = search(text, i)
+        if match is None:
+            break
+        i = match.start()
         ch = text[i]
         if ch == "\n":
             line += 1
@@ -58,8 +73,8 @@ def _brace_balance(text):
         elif ch == '"':
             in_quotes = True
         elif ch == "#":
-            while i < n and text[i] != "\n":
-                i += 1
+            newline = text.find("\n", i)
+            i = n if newline == -1 else newline
             continue
         elif ch == "{":
             depth += 1
@@ -252,14 +267,31 @@ def validate(mod_root, loc, gfx_index, progress=None):
     mod_abs = os.path.abspath(mod_root)
     checked_missing = set()
 
+    listing_cache = {}
+
     def _texture_exists(path):
         """The game is tolerant about the extension - vanilla's own .gfx
         files still say .tga for art that shipped as .dds years ago, and it
-        loads fine - so an extension-swapped sibling counts as present."""
-        if os.path.isfile(path):
+        loads fine - so an extension-swapped sibling counts as present.
+
+        Answered from one cached listing per directory: sprites cluster into
+        a handful of art folders, so the per-file stat calls this replaces
+        were re-reading the same directories thousands of times. Names are
+        compared through normcase so this keeps os.path.isfile's own
+        semantics - case-insensitive on Windows, case-sensitive elsewhere -
+        rather than inventing a tolerance the filesystem doesn't have."""
+        directory, name = os.path.split(path)
+        names = listing_cache.get(directory)
+        if names is None:
+            try:
+                names = {os.path.normcase(entry) for entry in os.listdir(directory)}
+            except OSError:
+                names = set()
+            listing_cache[directory] = names
+        if os.path.normcase(name) in names:
             return True
-        stem = os.path.splitext(path)[0]
-        return any(os.path.isfile(stem + ext) for ext in (".dds", ".tga", ".png"))
+        stem = os.path.normcase(os.path.splitext(name)[0])
+        return any(stem + ext in names for ext in (".dds", ".tga", ".png"))
 
     # Scope: only sprites this mod actually invents. A mod re-declaring a
     # vanilla sprite name (very common - overriding one .gfx file re-lists

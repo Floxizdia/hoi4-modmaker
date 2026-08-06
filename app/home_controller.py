@@ -14,6 +14,7 @@ import threading
 from tkinter import filedialog
 
 from app import local_mods
+from app import game_paths
 from app.home_data import HomeData
 from app.home_view import HomeView
 from app.mod_browser import DEFAULT_STEAM_WORKSHOP
@@ -57,10 +58,9 @@ class HomeController:
         self.on_new_mod()
 
     def open_folder(self, path):
-        try:
-            os.startfile(path)
-        except OSError:
-            pass
+        # os.startfile doesn't exist off Windows; game_paths picks the right
+        # file manager for the platform
+        game_paths.open_folder(path)
 
     def browse(self):
         path = filedialog.askdirectory(title="Select a mod folder", initialdir=DEFAULT_STEAM_WORKSHOP)

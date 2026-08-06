@@ -281,7 +281,10 @@ class FocusTreeDataTests(unittest.TestCase):
 
         FocusTreeInspector.show_tree_settings(Inspector(), {
             "id": "TEST_tree",
-            "source_file": r"C:\\mods\\test\\common\\national_focus\\test.txt",
+            # built with the running platform's separator: a hardcoded
+            # Windows path made basename() return the whole string on Linux
+            "source_file": os.path.join("mods", "test", "common",
+                                        "national_focus", "test.txt"),
             "focuses": [{"id": "TEST_start"}],
             "default": "no",
         })

@@ -128,7 +128,13 @@ class App(tk.Tk):
         asset_root = getattr(sys, "_MEIPASS", os.path.dirname(os.path.abspath(__file__)))
         icon_path = os.path.join(asset_root, "assets", "app_icon.ico")
         if os.path.isfile(icon_path):
-            self.iconbitmap(default=icon_path)
+            try:
+                # `-default` is a Windows-only Tk option; on X11 it raises and
+                # .ico isn't a format Tk can read there anyway, so the window
+                # keeps the toolkit's own icon rather than failing to open
+                self.iconbitmap(default=icon_path)
+            except tk.TclError:
+                pass
         self.geometry("1320x840")
         self.minsize(1000, 660)
         theme.apply(self)

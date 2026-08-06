@@ -21,7 +21,10 @@ ITEM_TEXT = "#e6dcc4"
 DIM_TEXT = "#9a917c"
 COST_TEXT = "#e0b23c"
 
-BASE_GAME = r"C:\Program Files (x86)\Steam\steamapps\common\Hearts of Iron IV"
+from app.game_paths import find_base_game
+
+#: resolved once at import; empty when HOI4 isn't installed here
+BASE_GAME = find_base_game()
 
 
 def _asset(*parts):

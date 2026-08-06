@@ -17,9 +17,13 @@ from tkinter import ttk, messagebox
 from app.state import state
 from app import pds_scan as scan
 from app import theme, ui_kit
-from app.tech_graph import find_tech_files, parse_techs, build_graph, folders, resolve_icon
+from app.tech_graph import (find_tech_files, parse_techs, build_graph, folders,
+                            resolve_icon, NO_FOLDER)
 from app import tech_graph
 from app import image_cache
+from app import dlc
+from app import dlc_prefs
+from app import mod_loader
 from app import layout as layout_mod
 from app import mod_export
 from app import undo
@@ -212,33 +216,115 @@ class _RawEditor(ttk.Frame):
 COL_W, ROW_H = 78, 78
 ICON_SIZE = 50
 
+#: same two words the Focus Tree's Layout picker uses, so the choice means
+#: the same thing on both screens: draw the authored coordinates, or ignore
+#: them and derive a layout from the prerequisite graph
+AUTO_LAYOUT = "auto"
+MOD_COORDS = "mod coordinates"
+
+
+class _ScanCache:
+    """Shared between the Tech Tree and Doctrines views.
+
+    Both draw from the same three scans - the tech graph, the base/mod
+    sprite indexes, and one index per DLC - which together take about a
+    second on a large mod and depend only on which mod is open, not on
+    which view is asking. Without this the second tab repeated all of it,
+    so opening Doctrines cost a second of frozen UI for data already in
+    memory. Rescan drops the cache; switching tabs reuses it."""
+
+    def __init__(self):
+        self.key = None
+        self.data = None
+
+    def get(self, mod_root, build):
+        if self.key != mod_root or self.data is None:
+            self.data = build()
+            self.key = mod_root
+        return self.data
+
+    def invalidate(self):
+        self.key = None
+        self.data = None
+
+
+_scan_cache = _ScanCache()
+
+
+_LOC_REF_RE = re.compile(r"^\$([A-Za-z0-9_.\-]+)\$$")
+
+
+def _display_name(key, fallback=None):
+    """The name the game shows. A tech's (and folder's) loc key is just its
+    id, and state.text_for already layers session edits over the mod over
+    vanilla.
+
+    Vanilla routinely defines one entry as a pointer to another rather than
+    repeating the text - `bba_air_techs_folder:0 "$air_techs_folder$"`, and
+    27 of the base game's tech names do the same - so a bare lookup would
+    put a literal "$air_techs_folder$" on screen where the game shows
+    "Air"."""
+    original, seen = key, set()
+    text = state.text_for(key, "")
+    while text and key not in seen:
+        seen.add(key)
+        match = _LOC_REF_RE.match(text.strip())
+        if not match:
+            break
+        key = match.group(1)
+        text = state.text_for(key, "")
+    return text or fallback or original
+
 
 class TechTreeView(ttk.Frame):
     """The same folder-tab / grid-of-plaques arrangement the game's own
-    research screen uses, built from `folder.position` - which the game
-    ships pre-laid-out and essentially collision-free, unlike focus trees
-    where trusting stored x/y caused the overlap bug this app already fixed
-    once. So no auto-layout pass is needed here, just draw where it says."""
+    research screen uses, built from `folder.position`.
 
-    def __init__(self, master):
+    Defaults to those authored coordinates rather than the focus tree's
+    "auto", because the game ships its research folders pre-laid-out and
+    the point of this screen is to match what the player sees. The Layout
+    picker still offers the derived layout for folders a mod extended
+    without positioning anything."""
+
+    def __init__(self, master, doctrines=False):
         super().__init__(master, padding=6)
+        self.doctrines = doctrines
         self.graph = {}
         self.folder_names = []
+        self._folder_by_label = {}
         self.current_folder = None
         self.selected = None
         self.icon_refs = []
         self.zoom = 1.0
+        self._all_folders = []
+        self._dlc_catalogue = []
+        self._dlc_rules = {}
+        self._dlc_vars = {}
+        self._dlc_gfx = {}
+        self._gfx_base = {}
+        self._gfx_mod = {}
+        self._gfx = {}
         self._build()
 
     def _build(self):
         top = ttk.Frame(self)
         top.pack(fill="x")
-        ttk.Button(top, text="Rescan", style="Accent.TButton", command=self.reload).pack(side="left")
+        ttk.Button(top, text="Rescan", style="Accent.TButton",
+                   command=lambda: self.reload(force=True)).pack(side="left")
         ttk.Label(top, text="  Folder:").pack(side="left")
         self.folder_var = tk.StringVar()
         self.folder_combo = ttk.Combobox(top, textvariable=self.folder_var, state="readonly", width=26)
         self.folder_combo.pack(side="left", padx=4)
-        self.folder_combo.bind("<<ComboboxSelected>>", lambda e: self._show_folder(self.folder_var.get()))
+        self.folder_combo.bind("<<ComboboxSelected>>", lambda e: self._pick_folder())
+        ttk.Label(top, text="  Layout:").pack(side="left")
+        self.layout_mode = tk.StringVar(value=MOD_COORDS)
+        ttk.Combobox(top, textvariable=self.layout_mode, state="readonly", width=15,
+                     values=[AUTO_LAYOUT, MOD_COORDS]).pack(side="left", padx=4)
+        self.layout_mode.trace_add("write", lambda *_a: self._show_folder(self.current_folder))
+        self.dlc_button = ttk.Menubutton(top, text="DLC", width=12)
+        self.dlc_menu = tk.Menu(self.dlc_button, tearoff=False)
+        self.dlc_button["menu"] = self.dlc_menu
+        self.dlc_button.pack(side="left", padx=(10, 0))
         ttk.Button(top, text="−", width=3, command=lambda: self._set_zoom(self.zoom / 1.2)).pack(side="left", padx=(14, 0))
         ttk.Button(top, text="100%", width=5, command=lambda: self._set_zoom(1.0)).pack(side="left", padx=2)
         ttk.Button(top, text="+", width=3, command=lambda: self._set_zoom(self.zoom * 1.2)).pack(side="left")
@@ -272,17 +358,27 @@ class TechTreeView(ttk.Frame):
         side = ttk.Frame(body, width=300, padding=(10, 0, 0, 0))
         side.pack(side="left", fill="y")
         side.pack_propagate(False)
-        ttk.Label(side, text="TECH DETAILS", style="Gold.TLabel").pack(anchor="w")
+        ttk.Label(side, text="DOCTRINE DETAILS" if self.doctrines else "TECH DETAILS",
+                  style="Gold.TLabel").pack(anchor="w")
         self.detail = ttk.Label(side, text="Click a technology.", style="Muted.TLabel",
                                 wraplength=280, justify="left")
         self.detail.pack(anchor="w", pady=(6, 10), fill="x")
         ttk.Button(side, text="Edit Raw Block...", command=self._edit_selected).pack(anchor="w")
+        if self.doctrines:
+            ttk.Button(side, text="How doctrines work...",
+                       command=self._show_doctrine_help).pack(anchor="w", pady=(6, 0))
+
+    def _show_doctrine_help(self):
+        DoctrineHelpDialog(self)
 
     # ---- loading ----
 
     def on_mod_changed(self):
         self.graph = {}
         self.folder_names = []
+        self._all_folders = []
+        self._folder_by_label = {}
+        self._gfx = {}
         self.current_folder = None
         self.selected = None
         self.canvas.delete("all")
@@ -292,22 +388,159 @@ class TechTreeView(ttk.Frame):
         self.researched = set()
         self.country_combo["values"] = []
 
-    def reload(self):
+    def reload(self, force=False):
         if not state.is_loaded:
             messagebox.showerror("No mod", "Open a mod first.")
             return
-        self.graph = tech_graph.build_graph(state.mod_root)
-        tags = tech_graph.country_tags(state.mod_root)
+        if force:
+            _scan_cache.invalidate()
+        scan_data = _scan_cache.get(state.mod_root, self._scan)
+        self.graph = scan_data["graph"]
+        tags = scan_data["tags"]
         self.country_combo["values"] = tags
         if self.country_var.get() not in tags:
             self.country_var.set("GER" if "GER" in tags else (tags[0] if tags else ""))
         self.researched = tech_graph.starting_techs(state.mod_root, self.country_var.get())
-        self.folder_names = tech_graph.folders(self.graph)
-        self.folder_combo["values"] = self.folder_names
-        if self.folder_names:
-            self.folder_var.set(self.folder_names[0])
-            self._show_folder(self.folder_names[0])
-        self.count_label.config(text=f"{len(self.graph)} techs | {self.country_var.get() or '-'}: {len(self.researched)} researched")
+        self._load_dlc(scan_data)
+        self._all_folders = [f for f in tech_graph.folders(self.graph)
+                             if tech_graph.is_doctrine_folder(self.graph, f) == self.doctrines]
+        self._apply_dlc()
+
+    @staticmethod
+    def _scan():
+        """Everything a reload needs off disk, in one place so the cache can
+        hold it. Each DLC's sprites are indexed separately, so toggling one
+        later is a dict merge rather than a rescan of every .gfx in the
+        game."""
+        from app.map_data import BASE_GAME
+
+        entries = dlc.available(BASE_GAME)
+        return {
+            "graph": tech_graph.build_graph(state.mod_root),
+            "tags": tech_graph.country_tags(state.mod_root),
+            "dlc_entries": entries,
+            "dlc_rules": dlc.folder_rules([BASE_GAME, state.mod_root]),
+            "gfx_base": mod_loader.build_gfx_index([BASE_GAME]),
+            "gfx_mod": mod_loader.build_gfx_index([state.mod_root]),
+            "dlc_gfx": {entry["name"]: mod_loader.build_gfx_index([entry["path"]])
+                        for entry in entries if entry["path"]},
+        }
+
+    # ---- DLC ----
+
+    def _load_dlc(self, scan_data):
+        self._dlc_rules = scan_data["dlc_rules"]
+        self._gfx_base = scan_data["gfx_base"]
+        self._gfx_mod = scan_data["gfx_mod"]
+        self._dlc_gfx = scan_data["dlc_gfx"]
+        self._dlc_catalogue = [e for e in scan_data["dlc_entries"] if self._affects_tech(e)]
+
+        turned_off = set(dlc_prefs.load_disabled())
+        self._dlc_vars = {}
+        self.dlc_menu.delete(0, "end")
+        previous_category = None
+        for entry in self._dlc_catalogue:
+            if previous_category is not None and entry["category"] != previous_category:
+                self.dlc_menu.add_separator()
+            previous_category = entry["category"]
+            var = tk.BooleanVar(value=entry["default_on"] and entry["name"] not in turned_off)
+            self._dlc_vars[entry["name"]] = var
+            note = "in the base game" if entry["bundled"] else (entry["category"] or "dlc")
+            self.dlc_menu.add_checkbutton(label=f"{entry['name']}  ({note})",
+                                          variable=var, command=self._apply_dlc)
+        if not self._dlc_catalogue:
+            self.dlc_menu.add_command(label="No DLC found in the game folder", state="disabled")
+
+    def _affects_tech(self, entry):
+        """Whether toggling this DLC would change anything on this screen.
+
+        Decided from the data rather than from the DLC's category: it counts
+        if it gates a technology folder, or if it ships a sprite some tech
+        actually draws. Music and wallpaper packs do neither and would
+        otherwise pad the menu with two dozen entries that do nothing here.
+        Bundled DLC has no folder of its own, so it stays if it gates."""
+        if entry["name"] in dlc.gating_dlc(self._dlc_rules):
+            return True
+        for sprite in self._dlc_gfx.get(entry["name"], ()):
+            if not sprite.startswith("GFX_"):
+                continue
+            core = sprite[4:]
+            core = core[:-7] if core.endswith("_medium") else core
+            if core in self.graph or core[4:] in self.graph:
+                return True
+        return False
+
+    def _active_dlc(self):
+        return {name for name, var in self._dlc_vars.items() if var.get()}
+
+    def refresh_dlc_from_prefs(self):
+        """Pick up a DLC choice made on the sibling view. Both views write
+        the same preference file, so re-reading it is enough to keep the
+        Tech Tree and Doctrines tabs from disagreeing about what is on."""
+        if not self._dlc_vars:
+            return
+        disabled = set(dlc_prefs.load_disabled())
+        changed = False
+        for name, var in self._dlc_vars.items():
+            wanted = name not in disabled
+            if var.get() != wanted:
+                var.set(wanted)
+                changed = True
+        if changed:
+            self._apply_dlc()
+
+    def _apply_dlc(self):
+        """Rebuild everything a DLC toggle changes: which folders the game
+        would show, and which art it would draw them with."""
+        active = self._active_dlc()
+        dlc_prefs.save_disabled([name for name in self._dlc_vars if name not in active])
+
+        self._gfx = dict(self._gfx_base)
+        for entry in self._dlc_catalogue:          # catalogue order, mod last
+            if entry["name"] in active and entry["name"] in self._dlc_gfx:
+                self._gfx.update(self._dlc_gfx[entry["name"]])
+        self._gfx.update(self._gfx_mod)
+
+        self.folder_names = [f for f in self._all_folders
+                             if dlc.folder_available(self._dlc_rules, f, active)]
+        self._folder_by_label = self._folder_labels(self.folder_names)
+        self.folder_combo["values"] = list(self._folder_by_label)
+
+        if self.current_folder not in self.folder_names:
+            self.current_folder = self.folder_names[0] if self.folder_names else None
+        label = next((lbl for lbl, raw in self._folder_by_label.items()
+                      if raw == self.current_folder), "")
+        self.folder_var.set(label)
+        self._show_folder(self.current_folder)
+
+        hidden = len(self._all_folders) - len(self.folder_names)
+        self.dlc_button.config(text=f"DLC: {len(active)}/{len(self._dlc_catalogue)}")
+        self.count_label.config(
+            text=f"{len(self.graph)} techs | {self.country_var.get() or '-'}: "
+                 f"{len(self.researched)} researched"
+            + (f" | {hidden} folder(s) hidden by DLC" if hidden else ""))
+
+    @staticmethod
+    def _folder_labels(folder_names):
+        """{label shown in the picker: raw folder name}, using the game's own
+        folder names ("Armor", not "armour_folder"). Vanilla localises both
+        armour_folder and nsb_armour_folder to "Armor", so a label that would
+        be ambiguous keeps the raw id alongside it."""
+        display = {name: _display_name(name) for name in folder_names}
+        # techs with no folder block aren't on the game's research screen at
+        # all - hidden hull/variant unlocks granted at gamestart - so say that
+        # rather than showing a bare "(no folder)"
+        if NO_FOLDER in display:
+            display[NO_FOLDER] = "Not on the research screen"
+        clashes = {t for t in display.values() if list(display.values()).count(t) > 1}
+        labels = {}
+        for name in folder_names:
+            text = display[name]
+            labels[f"{text}  ({name})" if text in clashes else text] = name
+        return labels
+
+    def _pick_folder(self):
+        self._show_folder(self._folder_by_label.get(self.folder_var.get()))
 
     def _load_country_status(self):
         self.researched = tech_graph.starting_techs(state.mod_root, self.country_var.get())
@@ -321,17 +554,25 @@ class TechTreeView(ttk.Frame):
     # ---- drawing ----
 
     def _grid_positions(self, items):
-        """{tech_id: (col, row)} in the folder's own grid units - straight
-        from `folder.position` when that data is real, or derived from the
-        prerequisite graph (same depth + barycenter pass the focus tree
-        uses) when it isn't. Mods regularly leave position off techs that
-        don't need the visual tuning base-game folders got (this mod's own
-        air-tech folder has 20 of 21 techs sitting on 0,0) - trusting that
-        blindly would stack them all into one node, exactly like the old
-        focus-tree overlap bug this app already fixed once."""
+        """{tech_id: (col, row)} in the folder's own grid units.
+
+        "mod coordinates" draws `folder.position` as authored, which is the
+        layout the game itself renders; "auto" ignores it and derives one
+        from the prerequisite graph (the same depth + barycenter pass the
+        focus tree uses), which is what makes a folder readable when a mod
+        adds techs without positioning them.
+
+        Even in "mod coordinates" a folder whose techs mostly carry no
+        position block at all falls through to the derived layout - drawing
+        those would stack the lot on one cell. The test is whether a
+        position is declared, not whether the coordinates look varied
+        enough: vanilla's four mutually-exclusive doctrine branches
+        genuinely share cells (the game shows one branch at a time in that
+        slot), and an earlier distinct-coordinate heuristic read that as
+        corrupt data and threw the real layout away."""
         coords = {tid: (info["x"], info["y"]) for tid, info in items.items()}
-        distinct = len(set(coords.values()))
-        if distinct >= max(2, len(items) * 0.6):
+        positioned = sum(1 for info in items.values() if info.get("positioned"))
+        if self.layout_mode.get() == MOD_COORDS and positioned >= max(2, len(items) * 0.6):
             grid = coords
         else:
             synthetic = [{"id": tid, "x": info["x"],
@@ -340,14 +581,25 @@ class TechTreeView(ttk.Frame):
                         for tid, info in items.items()]
             grid = layout_mod.auto_layout(synthetic)
 
-        # even "trustworthy" position data isn't always collision-free - some
-        # DLC folders (naval/air doctrine expansions in this mod) place a
-        # handful of techs from different sub-branches on the exact same
-        # cell, which the game's own multi-lane rendering hides but a flat
-        # grid can't. Nudge any exact duplicate rightward onto a free cell.
-        occupied = set()
-        resolved = {}
+        # Authored positions aren't always collision-free: vanilla's doctrine
+        # branches are mutually exclusive and share cells, which the game
+        # hides by showing one branch at a time but a flat grid can't. Only
+        # the extra claimants on a contested cell get nudged aside - every
+        # cell claimed once is reserved up front, so a tech that had the grid
+        # to itself in the game data still draws exactly where the game puts
+        # it instead of being displaced by a neighbour's overflow.
+        first_claim = {}
+        overflow = []
         for tid in sorted(grid, key=lambda t: (grid[t][1], grid[t][0], t)):
+            cell = grid[tid]
+            if cell in first_claim:
+                overflow.append(tid)
+            else:
+                first_claim[cell] = tid
+
+        resolved = {tid: cell for cell, tid in first_claim.items()}
+        occupied = set(first_claim)
+        for tid in overflow:
             cell = layout_mod.next_free_cell(occupied, grid[tid])
             occupied.add(cell)
             resolved[tid] = cell
@@ -361,7 +613,8 @@ class TechTreeView(ttk.Frame):
         if not folder:
             return
 
-        items = {tid: info for tid, info in self.graph.items() if (info["folder"] or "(no folder)") == folder}
+        items = {tid: info for tid, info in self.graph.items()
+                 if (info["folder"] or NO_FOLDER) == folder}
         if not items:
             return
 
@@ -399,7 +652,8 @@ class TechTreeView(ttk.Frame):
     def _draw_node(self, tech_id, info, x, y):
         size = int(ICON_SIZE * self.zoom)
         selected = tech_id == self.selected
-        icon_path = tech_graph.resolve_icon(state.mod_root, tech_id)
+        icon_path = tech_graph.resolve_icon(state.mod_root, tech_id, self._gfx,
+                                            self.country_var.get())
         thumb = image_cache.get_scaled(icon_path, (size, size)) if icon_path else None
         tag = f"tech::{tech_id}"
 
@@ -417,9 +671,17 @@ class TechTreeView(ttk.Frame):
             self.icon_refs.append(thumb)
             self.canvas.create_image(x, y, image=thumb, tags=(tag,))
         else:
-            self.canvas.create_text(x, y, text=tech_id[:10], fill=theme.MUTED,
+            self.canvas.create_text(x, y, text=_display_name(tech_id)[:22], fill=theme.MUTED,
                                     font=(theme.FACE_UI, max(6, int(7 * self.zoom))),
                                     width=size, justify="center", tags=(tag,))
+
+        # the game labels every tech under its plaque; without it a folder of
+        # unfamiliar icons is unreadable to anyone who hasn't memorised them
+        if self.zoom >= 0.75:
+            self.canvas.create_text(
+                x, y + half + 9, text=_display_name(tech_id), fill=theme.TEXT,
+                font=(theme.FACE_UI, max(6, int(7 * self.zoom))),
+                width=int(COL_W * self.zoom) - 4, justify="center", tags=(tag,))
 
     # ---- interaction ----
 
@@ -434,11 +696,17 @@ class TechTreeView(ttk.Frame):
     def _select(self, tech_id):
         self.selected = tech_id
         info = self.graph.get(tech_id, {})
+        name = _display_name(tech_id)
         lines = [
-            tech_id + ("  (vanilla)" if info.get("is_vanilla") else "  (this mod)"),
+            name + ("  (vanilla)" if info.get("is_vanilla") else "  (this mod)"),
+            "" if name == tech_id else f"id: {tech_id}",
             f"Starting status for {self.country_var.get() or '-'}: "
             + ("RESEARCHED" if tech_id in self.researched else "NOT RESEARCHED"),
             f"cost {info.get('research_cost', '?')}   year {info.get('start_year', '?')}",
+            # doctrines are paid for in XP, so the research cost alone is
+            # misleading on that tab
+            (f"unlock: {info['xp_cost']} {info.get('xp_type') or ''} XP"
+             if info.get("xp_cost") else ""),
             "",
             "Requires: " + (", ".join(info.get("requires", [])) or "(nothing)"),
             "",
@@ -487,7 +755,7 @@ class TechTreeView(ttk.Frame):
             with open(path, "w", encoding="utf-8") as f:
                 f.write(new_text)
             dialog.destroy()
-            self.reload()
+            self.reload(force=True)   # the file on disk just changed
 
         btns = ttk.Frame(dialog)
         btns.pack(fill="x", padx=8, pady=(0, 8))
@@ -496,10 +764,84 @@ class TechTreeView(ttk.Frame):
         dialog.grab_set()
 
 
+DOCTRINE_GUIDE = """WHAT A DOCTRINE IS
+
+A doctrine is an ordinary technology carrying `doctrine = yes`. What makes
+it behave differently in game is that it is bought with experience, not
+research time:
+
+    xp_research_type = army        # army | navy | air
+    xp_unlock_cost   = 100         # how much XP unlocking it costs
+
+The four land branches, three naval and three air branches are mutually
+exclusive. That is what `xor` on the branch root does - picking one locks
+the others out for the rest of the game:
+
+    mobile_warfare = {
+        doctrine_name = "MOBILE_WARFARE_DOCTRINE"   # loc key for the branch
+        xor = { superior_firepower trench_warfare mass_assault }
+        ...
+    }
+
+Only branch roots carry `doctrine_name` and `xor`; the techs further down a
+branch are chained with `path = { leads_to_tech = ... }` like any other
+technology.
+
+WHY THEY OVERLAP ON THIS SCREEN
+
+Branch roots share the same `folder.position` in vanilla - the game shows
+one branch at a time in that slot, so the data has them stacked. This
+editor draws every alternative at once and nudges the extras sideways, so a
+row here is "the four choices at that depth", not four separate slots.
+
+ADDING A DOCTRINE OF YOUR OWN
+
+1. Put it in a file of its own under common/technologies/ so a game patch
+   editing vanilla's doctrine files can't collide with your work.
+2. Give the branch root `doctrine = yes`, a `doctrine_name`, an
+   `xp_research_type`, an `xp_unlock_cost`, and a `folder` block naming an
+   existing doctrine folder (or one you add in
+   common/technology_tags/) with a position.
+3. If it replaces one of vanilla's branches, add your id to the `xor` of
+   every branch it competes with AND add theirs to yours - xor is not
+   applied symmetrically for you.
+4. Chain the rest of the branch with `path = { leads_to_tech = ... }`.
+5. Add localisation for the tech id and for the `doctrine_name` key, then
+   run Validate - a doctrine with no loc shows as a blank plaque in game.
+
+A new doctrine folder also needs a `ledger` (army/navy/air) in
+common/technology_tags/, otherwise it never appears on the research screen.
+"""
+
+
+class DoctrineHelpDialog(tk.Toplevel):
+    def __init__(self, master):
+        super().__init__(master)
+        self.title("How doctrines work")
+        self.geometry("720x560")
+        outer = ttk.Frame(self, padding=12)
+        outer.pack(fill="both", expand=True)
+        ttk.Label(outer, text="DOCTRINES", style="PageTitle.TLabel").pack(anchor="w")
+
+        text = tk.Text(outer, wrap="word", relief="flat", borderwidth=0,
+                       background=theme.CANVAS_BG, foreground=theme.TEXT,
+                       font=(theme.FACE_MONO, 9), padx=8, pady=8)
+        bar = ttk.Scrollbar(outer, orient="vertical", command=text.yview)
+        text.configure(yscrollcommand=bar.set)
+        text.pack(side="left", fill="both", expand=True, pady=(6, 0))
+        bar.pack(side="right", fill="y", pady=(6, 0))
+        text.insert("1.0", DOCTRINE_GUIDE)
+        text.configure(state="disabled")
+
+        ttk.Button(self, text="Close", command=self.destroy).pack(pady=(0, 10))
+        self.grab_set()
+
+
 class TechTab(ttk.Frame):
-    """Visual research-screen view first, the byte-preserving raw editor
-    kept one tab over for anyone who needs to hand-edit an engine-specific
-    field the visual view doesn't surface."""
+    """Visual research-screen view first, doctrines on a tab of their own
+    because they are bought with XP and mutually exclusive rather than
+    researched in sequence, and the byte-preserving raw editor last for
+    anyone who needs to hand-edit a field the visual view doesn't surface."""
 
     def __init__(self, master):
         super().__init__(master, padding=6)
@@ -511,8 +853,10 @@ class TechTab(ttk.Frame):
         nb = ttk.Notebook(self)
         nb.pack(fill="both", expand=True, padx=2, pady=2)
         self.tree_view = TechTreeView(nb)
+        self.doctrine_view = TechTreeView(nb, doctrines=True)
         self.raw_editor = _RawEditor(nb)
         nb.add(self.tree_view, text="Tech Tree")
+        nb.add(self.doctrine_view, text="Doctrines")
         nb.add(self.raw_editor, text="Raw Editor")
         nb.bind("<<NotebookTabChanged>>", self._on_tab_changed)
         self._nb = nb
@@ -525,12 +869,23 @@ class TechTab(ttk.Frame):
             self.header.set_status(True, state.mod_name)
         else:
             self.header.set_status(False, "no mod open")
+        _scan_cache.invalidate()   # a different mod means different files
         self.tree_view.on_mod_changed()
+        self.doctrine_view.on_mod_changed()
         # _RawEditor already subscribes to state itself
 
+    def _views(self):
+        return {0: self.tree_view, 1: self.doctrine_view}
+
     def _on_tab_changed(self, event):
-        if self._nb.index("current") == 0 and state.is_loaded and not self.tree_view.graph:
-            self.tree_view.reload()
+        view = self._views().get(self._nb.index("current"))
+        if view is None or not state.is_loaded:
+            return
+        if not view.graph:
+            view.reload()
+        else:
+            # the other view may have changed the DLC selection since
+            view.refresh_dlc_from_prefs()
 
     def on_show(self):
         if state.is_loaded and not self.tree_view.graph:

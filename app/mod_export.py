@@ -14,12 +14,10 @@ import os
 import re
 import shutil
 
-USER_DIR_CANDIDATES = [
-    os.path.join(os.path.expanduser("~"), "Documents", "Paradox Interactive", "Hearts of Iron IV"),
-    os.path.join(os.path.expanduser("~"), "OneDrive", "Documents", "Paradox Interactive", "Hearts of Iron IV"),
-    os.path.join(os.path.expanduser("~"), "OneDrive", "Belgeler", "Paradox Interactive", "Hearts of Iron IV"),
-    os.path.join(os.path.expanduser("~"), "Belgeler", "Paradox Interactive", "Hearts of Iron IV"),
-]
+from app import game_paths
+
+#: platform-aware; see game_paths for why this isn't a Documents path list
+USER_DIR_CANDIDATES = game_paths.user_dir_candidates()
 
 # Only these are copied for a submod - the folders this tool can write into.
 SUBMOD_FOLDERS = [

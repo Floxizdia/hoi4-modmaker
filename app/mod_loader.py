@@ -96,6 +96,11 @@ def _extract_focus(inner):
         "prerequisite": prereq,
         "prerequisite_groups": prereq_groups,
         "mutually_exclusive": mutex,
+        # `allow_branch = { has_dlc = "..." }` is how the game hides a whole
+        # focus branch from players without an expansion - 68 of vanilla's
+        # focuses use it, so a tree drawn without honouring it is not the
+        # tree the player sees
+        "allow_branch_raw": scan.first_block(inner, "allow_branch") or "",
         "available_raw": scan.first_block(inner, "available") or "",
         "bypass_raw": scan.first_block(inner, "bypass") or "",
         "completion_reward_raw": scan.first_block(inner, "completion_reward") or "",

@@ -24,7 +24,10 @@ from PIL import Image
 
 from app import pds_scan as scan
 
-BASE_GAME = r"C:\Program Files (x86)\Steam\steamapps\common\Hearts of Iron IV"
+from app.game_paths import find_base_game
+
+#: resolved once at import; empty when HOI4 isn't installed here
+BASE_GAME = find_base_game()
 
 FLAG_SIZES = {
     "": (82, 52),

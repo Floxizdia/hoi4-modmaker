@@ -15,14 +15,29 @@ def strip_comments(text):
     return _COMMENT_RE.sub("", text)
 
 
+#: only these characters can change brace depth or quote state; everything
+#: between them can be skipped in one C-level jump
+_BRACE_SCAN_RE = re.compile(r'[{}"\\]')
+
+
 def find_matching_brace(text, open_index):
     """Given the index of a '{' in text, return the index of its matching
-    '}', respecting quoted strings. Returns -1 if unmatched."""
+    '}', respecting quoted strings. Returns -1 if unmatched.
+
+    Jumps between the characters that matter instead of stepping over every
+    one: script files are mostly identifiers and whitespace, and walking
+    them a character at a time in Python made this the single most
+    expensive function in a whole-mod validation."""
     depth = 0
     in_quotes = False
     i = open_index
     n = len(text)
+    search = _BRACE_SCAN_RE.search
     while i < n:
+        match = search(text, i)
+        if match is None:
+            return -1
+        i = match.start()
         ch = text[i]
         if in_quotes:
             if ch == "\\":

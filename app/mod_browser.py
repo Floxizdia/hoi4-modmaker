@@ -20,6 +20,9 @@ from app import focus_sim
 from app import layout as auto_layout_mod
 from app import icon_library
 from app import mod_export
+from app import dlc
+from app import dlc_prefs
+from app import game_paths
 from app.leader_gallery import LeaderGallery
 from app.icon_creator import IconCreator
 from app import piece_composer
@@ -42,8 +45,9 @@ GAME_PLAQUE_W, GAME_PLAQUE_H = 164, 50
 GAME_SPACING_X = 186
 GAME_SPACING_Y = 176
 
-DEFAULT_STEAM_WORKSHOP = r"C:\Program Files (x86)\Steam\steamapps\workshop\content\394360"
-DEFAULT_BASE_GAME = r"C:\Program Files (x86)\Steam\steamapps\common\Hearts of Iron IV"
+#: resolved from the running machine's Steam libraries, not assumed
+DEFAULT_STEAM_WORKSHOP = game_paths.find_workshop()
+DEFAULT_BASE_GAME = game_paths.find_base_game()
 
 
 class NewFocusDialog(tk.Toplevel):
@@ -535,6 +539,8 @@ class ModBrowserTab(ttk.Frame):
         self.icon_refs = []
         self.zoom = 1.0
         self.completed = set()
+        self._dlc_names = None
+        self._dlc_vars = {}
         self.sim_mode = tk.BooleanVar(value=False)
         self._build()
 
@@ -744,6 +750,50 @@ class ModBrowserTab(ttk.Frame):
         )
         return path if os.path.isfile(path) else None
 
+    # ---- DLC ----
+
+    def _dlc_hidden_focuses(self, focuses):
+        """Focus ids hidden by the current DLC selection, rebuilding the
+        menu when the loaded tree turns out to reference different DLC than
+        the last one did."""
+        gates, names = dlc.focus_gates(focuses)
+        if names != self._dlc_names:
+            self._dlc_names = names
+            self._build_dlc_menu(names)
+        self._update_dlc_label()
+        return dlc.hidden_focuses(gates, self._active_dlc()) if gates else set()
+
+    def _build_dlc_menu(self, names):
+        """Only the DLC this tree actually gates gets listed - vanilla uses
+        seven across every tree it ships, and a menu of all 45 would bury
+        the handful that change what's on screen."""
+        menu = self.focus_tree_view.toolbar.dlc_menu
+        menu.delete(0, "end")
+        disabled = set(dlc_prefs.load_disabled())
+        self._dlc_vars = {}
+        for name in sorted(names):
+            var = tk.BooleanVar(value=name not in disabled)
+            self._dlc_vars[name] = var
+            menu.add_checkbutton(label=name, variable=var, command=self._on_dlc_changed)
+        if not names:
+            menu.add_command(label="No focus in this tree is DLC-gated", state="disabled")
+
+    def _update_dlc_label(self):
+        total = len(self._dlc_vars)
+        text = f"DLC: {len(self._active_dlc())}/{total}" if total else "DLC"
+        self.focus_tree_view.toolbar.dlc_button.config(text=text)
+
+    def _active_dlc(self):
+        return {name for name, var in self._dlc_vars.items() if var.get()}
+
+    def _on_dlc_changed(self):
+        # shares the Tech screen's preference file, so a DLC switched off
+        # here stays off there; names this tree never mentions are left be
+        disabled = set(dlc_prefs.load_disabled()) - set(self._dlc_vars)
+        disabled |= {name for name, var in self._dlc_vars.items() if not var.get()}
+        dlc_prefs.save_disabled(disabled)
+        self._render_tree()
+
     # ---- node drawing ----
 
     def _render_tree(self):
@@ -759,6 +809,9 @@ class ModBrowserTab(ttk.Frame):
         else:
             hidden, available = set(), set()
 
+        # branches an expansion gates behave like sim-hidden focuses: they
+        # are simply not part of the tree that player is shown
+        hidden = hidden | self._dlc_hidden_focuses(focuses)
         visible = [focus for focus in focuses if focus["id"] not in hidden]
         self.node_pos = self._resolve_positions(visible)
         self._by_id = {focus["id"]: focus for focus in focuses}

@@ -24,7 +24,10 @@ from app import mod_loader
 from app import starter
 from app import theme
 
-BASE_GAME = r"C:\Program Files (x86)\Steam\steamapps\common\Hearts of Iron IV"
+from app.game_paths import find_base_game
+
+#: resolved once at import; empty when HOI4 isn't installed here
+BASE_GAME = find_base_game()
 
 WORKSHOP_TAGS = [
     "Alternative History", "Balance", "Events", "Fixes", "Gameplay",

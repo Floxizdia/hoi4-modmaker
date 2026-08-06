@@ -21,6 +21,7 @@ from app import ui_kit
 from app import mod_loader as ml
 from app import safe_io
 from app import icon_library
+from app import game_paths
 from app import piece_composer
 from app.idea_preview import IdeaPreview
 from app.effect_wizard import EffectWizard
@@ -145,8 +146,8 @@ class IdeaDialog(tk.Toplevel):
         library = state.idea_icon_library
         if library is None:
             library = icon_library.build_idea_library(
-                r"C:\Program Files (x86)\Steam\steamapps\common\Hearts of Iron IV",
-                r"C:\Program Files (x86)\Steam\steamapps\workshop\content\394360",
+                game_paths.find_base_game(),
+                game_paths.find_workshop(),
                 extra_roots=[self.mod_root] if self.mod_root else (),
             )
             state.idea_icon_library = library

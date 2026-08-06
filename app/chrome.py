@@ -17,7 +17,10 @@ import os
 
 from PIL import Image, ImageTk
 
-BASE_GAME = r"C:\Program Files (x86)\Steam\steamapps\common\Hearts of Iron IV"
+from app.game_paths import find_base_game
+
+#: resolved once at import; empty when HOI4 isn't installed here
+BASE_GAME = find_base_game()
 INTERFACE = os.path.join(BASE_GAME, "gfx", "interface")
 
 # name -> (texture file, nine-slice border l/t/r/b, fallback colour)

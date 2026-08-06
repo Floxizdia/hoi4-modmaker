@@ -20,7 +20,10 @@ NAME_TEXT = "#f0dca8"
 MOD_TEXT = "#9fc98a"
 MOD_TEXT_NEG = "#c98a8a"
 
-BASE_GAME = r"C:\Program Files (x86)\Steam\steamapps\common\Hearts of Iron IV"
+from app.game_paths import find_base_game
+
+#: resolved once at import; empty when HOI4 isn't installed here
+BASE_GAME = find_base_game()
 
 _MOD_LINE_RE = re.compile(r"^([a-zA-Z_0-9.]+)\s*=\s*(-?[\d.]+)")
 
