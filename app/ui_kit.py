@@ -12,6 +12,25 @@ from tkinter import ttk
 
 from app import theme
 
+
+def repaint_on_becoming_visible(widget, render):
+    """Bind `render` to every event that means "you are on screen now".
+
+    Hand-painted canvases used to redraw only on <Configure>, which made
+    their whole contents depend on that one event arriving. It does on
+    Windows. Under Wayland it can arrive once before the surface is
+    drawable and never again, leaving a widget that is laid out and
+    clickable but blank - which is exactly how the navigation rail was
+    reported from Linux.
+
+    <Map> and <Expose> are what a compositor sends when a surface actually
+    becomes visible, and the idle call covers a widget that is already
+    mapped by the time it is built.
+    """
+    for sequence in ("<Configure>", "<Map>", "<Expose>"):
+        widget.bind(sequence, lambda e: render(), add="+")
+    widget.after_idle(render)
+
 PAD_PAGE = 20     # outer page margin
 PAD_SECTION = 16  # gap between stacked sections
 PAD_FIELD = 8      # gap between a section's fields
@@ -38,8 +57,14 @@ class PageHeader(ttk.Frame):
         title_row.grid(row=0, column=0, sticky="w")
         ttk.Label(title_row, text=title.upper(), style="PageTitle.TLabel").pack(side="left")
         if help_key:
-            ttk.Button(title_row, text="?", style="Help.TButton", width=2,
-                       command=lambda: open_help(self, help_key)).pack(side="left", padx=(8, 0))
+            # a bare "?" two characters wide was being missed entirely by the
+            # people it exists for. A labelled button reads as an offer of
+            # help rather than as punctuation.
+            button = ttk.Button(title_row, text="?  Guide", style="Help.TButton",
+                                command=lambda: open_help(self, help_key))
+            button.pack(side="left", padx=(10, 0))
+            attach_tooltip(button, "What this screen is for, how it works, and a worked "
+                                   "example. Every screen has one.")
 
         self._dot = tk.Canvas(top, width=9, height=9, highlightthickness=0, bg=theme.BG)
         self._dot.grid(row=0, column=1, sticky="e", padx=(0, 6))
@@ -102,9 +127,23 @@ class HelpDialog(tk.Toplevel):
     def __init__(self, master, entry):
         super().__init__(master)
         self.title(entry.get("title", "Help"))
-        self.resizable(False, False)
-        outer = ttk.Frame(self, padding=18)
-        outer.pack(fill="both", expand=True)
+
+        # The longest guides run past 850px tall. That fits a 1080p desktop
+        # and is cut off on a 768px laptop, with no way to reach the Close
+        # button - so the body scrolls and the window is capped to what the
+        # screen can actually show.
+        self._canvas = tk.Canvas(self, highlightthickness=0, background=theme.BG, bd=0)
+        bar = ttk.Scrollbar(self, orient="vertical", command=self._canvas.yview)
+        self._canvas.configure(yscrollcommand=bar.set)
+        self._canvas.pack(side="left", fill="both", expand=True)
+        bar.pack(side="right", fill="y")
+
+        outer = ttk.Frame(self._canvas, padding=18)
+        self._canvas.create_window((0, 0), window=outer, anchor="nw")
+        outer.bind("<Configure>",
+                   lambda e: self._canvas.configure(scrollregion=self._canvas.bbox("all")))
+        self._canvas.bind_all("<MouseWheel>", self._on_wheel)
+        self.bind("<Destroy>", lambda e: self._canvas.unbind_all("<MouseWheel>"))
 
         ttk.Label(outer, text=entry.get("title", "").upper(), style="PageTitle.TLabel",
                   wraplength=520, justify="left").pack(anchor="w")
@@ -134,8 +173,29 @@ class HelpDialog(tk.Toplevel):
             ex.pack(anchor="w", pady=(2, 12), fill="x")
 
         ttk.Button(outer, text="Close", command=self.destroy).pack(anchor="e")
+
         self.transient(master.winfo_toplevel())
         self.grab_set()
+        # sized once the layout has settled: a frame held by create_window
+        # has no usable size until the canvas has laid it out, and measuring
+        # in __init__ gave every dialog the same third-of-a-window height
+        self.after_idle(self._fit)
+
+    def _fit(self):
+        if not self.winfo_exists():
+            return
+        self.update_idletasks()
+        box = self._canvas.bbox("all")
+        if not box:
+            return
+        self._canvas.configure(scrollregion=box)
+        wanted_w, wanted_h = box[2], box[3]
+        height = min(wanted_h, self.winfo_screenheight() - 120)
+        self._canvas.configure(width=wanted_w, height=height)
+        self.geometry(f"{wanted_w + 20}x{height}")
+
+    def _on_wheel(self, event):
+        self._canvas.yview_scroll(-1 * (event.delta // 120), "units")
 
 
 class _Tooltip:
@@ -249,4 +309,11 @@ def install_styles(style):
     style.configure("Invalid.TEntry", fieldbackground=theme.SURFACE,
                      bordercolor=theme.RED, lightcolor=theme.RED, darkcolor=theme.RED)
     style.map("Invalid.TEntry", bordercolor=[("!disabled", theme.RED)])
-    style.configure("Help.TButton", font=(theme.FACE_MONO, 8, "bold"), padding=(2, 0))
+    style.configure("Help.TButton", font=(theme.FACE_MONO, 9, "bold"), padding=(10, 3),
+                    background=theme.RAISED, foreground=theme.GOLD,
+                    bordercolor=theme.GOLD_DIM, lightcolor=theme.RAISED,
+                    darkcolor=theme.RAISED, relief="solid")
+    style.map("Help.TButton",
+              background=[("active", theme.SELECTED)],
+              foreground=[("active", theme.GOLD)],
+              bordercolor=[("active", theme.GOLD)])

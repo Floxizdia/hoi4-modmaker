@@ -195,7 +195,7 @@ class HomeSidebar(ttk.Frame):
             w = max(track.winfo_width(), 1)
             frac = done_count / len(steps)
             track.create_rectangle(0, 0, w * frac, 2, fill=ht.ACCENT, outline="")
-        track.bind("<Configure>", draw_track)
+        ui_kit.repaint_on_becoming_visible(track, draw_track)
 
         ttk.Label(body, text="First time making a mod? Work through these in order.",
                   style="Home.SurfaceMuted.TLabel", wraplength=250,

@@ -91,6 +91,32 @@ class StateEditor(tk.Toplevel):
         ttk.Label(vp, text="province ids come from the\nstate's province list",
                   style="Muted.TLabel", justify="left").pack(anchor="w", pady=(4, 0))
 
+        # per-province buildings: a state's port lives here rather than in
+        # the state-wide list, so a coastal state can't be given a harbour
+        # from the Buildings column on the left
+        prov = ttk.LabelFrame(body, text="Province buildings", padding=8)
+        prov.grid(row=0, column=3, rowspan=2, sticky="nw", padx=(10, 0))
+        self.prov_buildings = {int(p): dict(v)
+                               for p, v in self.details["province_buildings"].items()}
+        self.prov_list = tk.Listbox(prov, height=9, width=26, exportselection=False)
+        self.prov_list.pack()
+
+        row = ttk.Frame(prov)
+        row.pack(fill="x", pady=(6, 0))
+        self.pb_prov = tk.StringVar(value=str(self.st["provinces"][0]) if self.st["provinces"] else "")
+        ttk.Combobox(row, textvariable=self.pb_prov, width=8,
+                     values=[str(p) for p in self.st["provinces"]]).pack(side="left")
+        self.pb_kind = tk.StringVar(value=map_data.PROVINCE_BUILDING_KEYS[0])
+        ttk.Combobox(row, textvariable=self.pb_kind, width=13,
+                     values=list(map_data.PROVINCE_BUILDING_KEYS)).pack(side="left", padx=2)
+        self.pb_level = tk.StringVar(value="1")
+        ttk.Spinbox(row, textvariable=self.pb_level, from_=0, to=10, width=4).pack(side="left")
+        ttk.Button(prov, text="Set", command=self._set_prov_building).pack(fill="x", pady=(4, 0))
+        ttk.Button(prov, text="Remove selected", command=self._del_prov_building).pack(fill="x", pady=(2, 0))
+        ttk.Label(prov, text="naval base = this state's port.\nOnly coastal provinces can have one.",
+                  style="Muted.TLabel", justify="left").pack(anchor="w", pady=(4, 0))
+        self._refresh_prov_list()
+
         self.status = ttk.Label(self, text="", style="Status.TLabel", wraplength=560, justify="left")
         self.status.pack(fill="x", **pad)
 
@@ -101,6 +127,39 @@ class StateEditor(tk.Toplevel):
         ttk.Label(btns, text="Province ids: " + ", ".join(str(p) for p in self.st["provinces"][:14])
                             + ("..." if len(self.st["provinces"]) > 14 else ""),
                   style="Muted.TLabel").pack(side="left", padx=10)
+
+    def _refresh_prov_list(self):
+        self.prov_list.delete(0, "end")
+        self._prov_rows = []
+        for province in sorted(self.prov_buildings):
+            for kind, level in sorted(self.prov_buildings[province].items()):
+                if str(level).strip() in ("", "0"):
+                    continue
+                self.prov_list.insert("end", f"{province}  {kind}  {level}")
+                self._prov_rows.append((province, kind))
+
+    def _set_prov_building(self):
+        try:
+            province = int(self.pb_prov.get())
+            level = int(self.pb_level.get())
+        except ValueError:
+            self.status.config(text="Province id and level both have to be whole numbers.")
+            return
+        if province not in self.st["provinces"]:
+            self.status.config(text=f"Province {province} isn't in this state — the game would ignore it.")
+            return
+        self.prov_buildings.setdefault(province, {})[self.pb_kind.get()] = str(level)
+        self._refresh_prov_list()
+        self.status.config(text="")
+
+    def _del_prov_building(self):
+        for index in reversed(self.prov_list.curselection()):
+            province, kind = self._prov_rows[index]
+            # 0 rather than dropping the key: the writer reads a zero as
+            # "take this building out of the file", and simply forgetting it
+            # here would leave the old level sitting in the state untouched
+            self.prov_buildings.setdefault(province, {})[kind] = "0"
+        self._refresh_prov_list()
 
     def _add_vp(self):
         try:
@@ -140,6 +199,7 @@ class StateEditor(tk.Toplevel):
                 buildings={k: v.get().strip() for k, v in self.buildings.items()},
                 resources={k: v.get().strip() for k, v in self.resources.items()},
                 victory_points=self._victory_points(),
+                province_buildings=self.prov_buildings,
             )
         except (OSError, ValueError) as exc:
             messagebox.showerror("Save failed", str(exc))
@@ -156,6 +216,9 @@ class MapTab(ttk.Frame):
         self.selected = set()
         self._photo = None
         self._hover_sid = 0
+        self._press_sid = 0      # state the current click started on
+        self._dragged = False    # became a drag, so release must not toggle
+        self._drag_adding = True
         self._build()
         state.subscribe(self.on_mod_changed)
 
@@ -180,6 +243,29 @@ class MapTab(ttk.Frame):
         self.info = ttk.Label(top, text="", style="Muted.TLabel")
         self.info.pack(side="left", padx=14)
 
+        # cores and claims: who calls a state theirs, and who is owed it.
+        # Both decide war goals and annexation in game, and both used to be
+        # hand-written into the state files
+        claims = ttk.Frame(self)
+        claims.pack(fill="x", pady=(6, 0))
+        ttk.Label(claims, text="View:").pack(side="left")
+        self.layer_var = tk.StringVar(value="owner")
+        layer = ttk.Combobox(claims, textvariable=self.layer_var, state="readonly", width=10,
+                             values=["owner", "cores", "claims"])
+        layer.pack(side="left", padx=4)
+        layer.bind("<<ComboboxSelected>>", lambda e: self._redraw())
+        ttk.Label(claims, text="for tag:").pack(side="left")
+        self.layer_tag = tk.StringVar()
+        tag_entry = ttk.Entry(claims, textvariable=self.layer_tag, width=6)
+        tag_entry.pack(side="left", padx=4)
+        tag_entry.bind("<KeyRelease>", lambda e: self._redraw())
+        ttk.Button(claims, text="Add core", command=lambda: self._claim_edit("core", True)).pack(side="left", padx=(10, 2))
+        ttk.Button(claims, text="Remove core", command=lambda: self._claim_edit("core", False)).pack(side="left", padx=2)
+        ttk.Button(claims, text="Add claim", command=lambda: self._claim_edit("claim", True)).pack(side="left", padx=(10, 2))
+        ttk.Button(claims, text="Remove claim", command=lambda: self._claim_edit("claim", False)).pack(side="left", padx=2)
+        self.claim_info = ttk.Label(claims, text="", style="Muted.TLabel")
+        self.claim_info.pack(side="left", padx=10)
+
         frame = ttk.Frame(self)
         frame.pack(fill="both", expand=True, pady=8)
         self.canvas = tk.Canvas(frame, background=theme.CANVAS_BG, highlightthickness=0)
@@ -193,6 +279,8 @@ class MapTab(ttk.Frame):
         frame.columnconfigure(0, weight=1)
 
         self.canvas.bind("<Button-1>", self._on_click)
+        self.canvas.bind("<B1-Motion>", self._on_drag)
+        self.canvas.bind("<ButtonRelease-1>", self._on_release)
         self.canvas.bind("<Double-Button-1>", self._on_double_click)
         self.canvas.bind("<Motion>", self._on_motion)
         self.canvas.bind("<MouseWheel>", lambda e: self.canvas.yview_scroll(-1 * (e.delta // 120), "units"))
@@ -200,9 +288,11 @@ class MapTab(ttk.Frame):
         self.canvas.bind("<ButtonPress-3>", lambda e: self.canvas.scan_mark(e.x, e.y))
         self.canvas.bind("<B3-Motion>", lambda e: self.canvas.scan_dragto(e.x, e.y, gain=1))
 
-        self.status = ttk.Label(self, text="Load the map, click states to select them (click again to unselect), "
-                                           "then give them to a tag. Double-click a state to edit its manpower, "
-                                           "buildings, resources and victory points. Right-drag pans, "
+        self.status = ttk.Label(self, text="Load the map, click states to select them (click again to unselect) "
+                                           "or drag across several at once — a drag starting on an unselected "
+                                           "state adds, starting on a selected one rubs out. Then give them to "
+                                           "a tag. Double-click a state to edit its manpower, "
+                                           "buildings, resources, ports and victory points. Right-drag pans, "
                                            "Shift+wheel scrolls sideways. Dark olive patches are real land this "
                                            "mod hasn't assigned to any state yet — not clickable, not sea.",
                                 style="Muted.TLabel", wraplength=1000, justify="left")
@@ -247,7 +337,19 @@ class MapTab(ttk.Frame):
     def _redraw(self):
         if not self.world:
             return
-        im = self.world.render(selected=self.selected)
+        lut = None
+        layer, tag = self.layer_var.get(), self.layer_tag.get().strip().upper()
+        if layer in ("cores", "claims") and len(tag) == 3:
+            kind = "core" if layer == "cores" else "claim"
+            lut = self.world.claim_lut(tag, kind=kind)
+            field = "cores" if kind == "core" else "claims"
+            hits = sum(1 for s in self.world.states.values() if tag in s.get(field, ()))
+            self.claim_info.config(text=f"{tag}: {hits} state(s) with a {kind}")
+        elif layer in ("cores", "claims"):
+            self.claim_info.config(text="type a 3-letter tag to see its cores/claims")
+        else:
+            self.claim_info.config(text="")
+        im = self.world.render(selected=self.selected, lut=lut)
         self._photo = ImageTk.PhotoImage(im)
         self.canvas.delete("all")
         self.canvas.create_image(0, 0, image=self._photo, anchor="nw")
@@ -268,23 +370,78 @@ class MapTab(ttk.Frame):
         owner = st["owner"] or "unowned"
         return f"{sid}: {name} ({owner})"
 
-    def _on_click(self, event):
+    def _selectable_at(self, event):
+        """The state under the cursor, or 0 for sea and unassigned land."""
         if not self.world:
-            return
+            return 0
         x, y = self._canvas_xy(event)
         sid = self.world.state_at(x, y)
         if sid <= 0 or sid == self.world.no_state_id:
-            return
-        if sid in self.selected:
-            self.selected.discard(sid)
-        else:
-            self.selected.add(sid)
-        self._redraw()
+            return 0
+        return sid
+
+    def _report_selection(self):
         self.status.config(
             text=f"Selected {len(self.selected)} state(s): "
                  + ", ".join(self._state_label(s) for s in sorted(self.selected)[:8])
                  + ("..." if len(self.selected) > 8 else "")
         )
+
+    def _on_click(self, event):
+        sid = self._selectable_at(event)
+        if not sid:
+            return
+        # a press starts a possible drag; whether it counts as a plain click
+        # is only known on release, so the toggle waits until then. Which way
+        # the drag paints is decided here, from the state under the cursor:
+        # starting on an unselected state adds, starting on a selected one
+        # rubs out, which is what a paint tool does everywhere else.
+        self._drag_adding = sid not in self.selected
+        self._dragged = False
+        self._press_sid = sid
+
+    def _paint(self, sid):
+        """Apply the drag's mode to one state. True when it changed."""
+        if self._drag_adding:
+            if sid in self.selected:
+                return False
+            self.selected.add(sid)
+        else:
+            if sid not in self.selected:
+                return False
+            self.selected.discard(sid)
+        return True
+
+    def _on_drag(self, event):
+        sid = self._selectable_at(event)
+        if not sid:
+            return
+        changed = False
+        if not self._dragged:
+            # the state the drag started on never gets a motion event of its
+            # own, so paint it as the stroke begins - otherwise a drag skips
+            # the one state the user actually pressed on
+            self._dragged = True
+            if self._press_sid:
+                changed = self._paint(self._press_sid)
+        changed = self._paint(sid) or changed
+        if not changed:
+            return
+        self._redraw()
+        self._report_selection()
+
+    def _on_release(self, event):
+        if self._dragged or not self._press_sid:
+            self._press_sid = 0
+            return
+        sid = self._press_sid
+        self._press_sid = 0
+        if sid in self.selected:
+            self.selected.discard(sid)
+        else:
+            self.selected.add(sid)
+        self._redraw()
+        self._report_selection()
 
     def _on_motion(self, event):
         if not self.world:
@@ -332,6 +489,47 @@ class MapTab(ttk.Frame):
         self.status.config(text="Selection cleared.")
 
     # ---- giving ----
+
+    def _claim_edit(self, kind, adding):
+        """Add or remove a core/claim for the tag in the View row across
+        every selected state."""
+        if not self.world or not self.selected:
+            messagebox.showerror("Nothing selected",
+                                 "Load the map and click at least one state first.")
+            return
+        tag = self.layer_tag.get().strip().upper()
+        if len(tag) != 3:
+            messagebox.showerror("Bad tag", "Type the 3-letter tag in the 'for tag' box first.")
+            return
+
+        # base-game states have to come into the mod before being edited
+        map_data.localise_state(
+            state.mod_root, sorted(self.selected), self.world.states,
+            record=lambda paths: mod_export.record_created(state.mod_root, paths),
+        )
+
+        changed = 0
+        field = "cores" if kind == "core" else "claims"
+        for sid in sorted(self.selected):
+            st = self.world.states.get(sid)
+            if not st:
+                continue
+            try:
+                wrote = map_data.apply_state_claims(
+                    st["file"], add=[tag] if adding else [],
+                    remove=[] if adding else [tag], kind=kind)
+            except OSError as exc:
+                self.status.config(text=f"state {sid}: {exc}")
+                continue
+            if wrote:
+                changed += 1
+            tags = set(st.get(field, ()))
+            tags.add(tag) if adding else tags.discard(tag)
+            st[field] = sorted(tags)
+
+        self._redraw()
+        verb = "given to" if adding else "taken from"
+        self.status.config(text=f"{changed} state file(s) updated — {kind} {verb} {tag}.")
 
     def _give(self):
         if not self.world or not self.selected:

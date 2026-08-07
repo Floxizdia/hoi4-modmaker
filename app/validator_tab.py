@@ -217,10 +217,8 @@ class ValidatorTab(ttk.Frame):
         if match:
             line = int(match.group(1))
 
-        app = self.winfo_toplevel()
-        if hasattr(app, "show") and hasattr(app, "tabs") and "code" in app.tabs:
-            app.show("code")
-            app.tabs["code"].open_file(path, line=line)
+        from app.code_editor import open_in_code
+        open_in_code(self, path, line=line)
 
     def _refresh(self):
         self.tree.delete(*self.tree.get_children())

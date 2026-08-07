@@ -75,19 +75,45 @@ def prune_auto(mod_root, keep=8):
             pass
 
 
-def restore(mod_root, zip_path):
-    """Extract a snapshot back over the mod. Returns restored file count."""
+def _inside(mod_root, target):
+    """True when `target` really is under `mod_root` - a zip-slip guard.
+
+    Comparing raw strings was wrong twice over: `target` is only absolute
+    when `mod_root` happens to be, so a relative mod folder failed every
+    check and restored nothing at all, and a bare prefix match would let
+    "/mods/foo-backup" pass as being inside "/mods/foo".
+    """
+    root = os.path.abspath(mod_root)
+    target = os.path.abspath(target)
+    return target == root or target.startswith(root + os.sep)
+
+
+def restore(mod_root, zip_path, safety_snapshot=True):
+    """Extract a snapshot back over the mod.
+
+    Returns (restored_count, safety_path). Restoring is the one destructive
+    thing this screen does, and picking the wrong entry from the list used
+    to overwrite the current files with no way back - so unless the caller
+    opts out, the current state is snapshotted first and its path handed
+    back to be shown to the user.
+    """
+    safety = None
+    if safety_snapshot:
+        safety, _ = create(mod_root, note="before-restore")
+
     count = 0
     with zipfile.ZipFile(zip_path, "r") as zf:
         for info in zf.infolist():
+            if info.is_dir():
+                continue
             target = os.path.normpath(os.path.join(mod_root, info.filename))
-            if not target.startswith(os.path.abspath(mod_root)):
-                continue  # zip-slip guard
+            if not _inside(mod_root, target):
+                continue
             os.makedirs(os.path.dirname(target), exist_ok=True)
             with zf.open(info) as src, open(target, "wb") as dst:
                 dst.write(src.read())
             count += 1
-    return count
+    return count, safety
 
 
 def export_archive(mod_root, out_path, progress=None):

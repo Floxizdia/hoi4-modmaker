@@ -289,11 +289,12 @@ class SettingsTab(ttk.Frame):
         if not messagebox.askyesno(
             "Restore snapshot?",
             f"Restore '{label}'?\n\nThis overwrites the mod's current script files with the "
-            "snapshot's versions. Taking a fresh snapshot first is recommended.",
+            "snapshot's versions.\n\nThe mod's current state is snapshotted first as "
+            "'before-restore', so this is reversible.",
         ):
             return
         try:
-            count = snapshots.restore(state.mod_root, path)
+            count, safety = snapshots.restore(state.mod_root, path)
         except OSError as exc:
             self.status.config(text=f"Restore failed partway through: {exc}. "
                                      "Some files may already have been overwritten - "
@@ -301,7 +302,10 @@ class SettingsTab(ttk.Frame):
             state._notify()
             return
         state._notify()
-        self.status.config(text=f"Restored {count} files from {label}.")
+        self._snap_refresh()
+        undo_hint = (" Your previous state is the 'before-restore' snapshot in this list."
+                     if safety else "")
+        self.status.config(text=f"Restored {count} files from {label}.{undo_hint}")
 
     def _export_archive(self):
         """A full, self-contained copy of the mod - textures and all - for

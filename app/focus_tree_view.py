@@ -78,6 +78,7 @@ class FocusTreeView(ttk.Frame):
             on_save_moved=callbacks["save_moved"],
             on_icon_library=callbacks["icon_library"],
             on_export_additions=callbacks["export_additions"],
+            on_import_drawio=callbacks["import_drawio"],
             on_play_export=callbacks["play_export"],
             on_publish=callbacks["publish"],
         )

@@ -70,12 +70,22 @@ class FocusTreeData:
                     os.path.normcase(os.path.abspath(self.base_game)) + os.sep
                 )
                 countries = "/".join(tree["country_tags"]) or "generic"
+                # "vanilla" spelt out rather than left to be inferred from the
+                # filename: a mod with entirely custom countries has no way to
+                # tell its own trees from the base game's at a glance
+                origin = "vanilla" if tree["is_vanilla"] else "MOD"
                 items.append((
-                    f"{countries} | "
-                    f"{tree['id']}  â€”  {os.path.basename(path)}  ({len(tree['focuses'])} focuses)",
+                    f"[{origin}] {countries} | "
+                    f"{tree['id']} - {os.path.basename(path)} "
+                    f"({len(tree['focuses'])} focuses)",
                     path,
                     tree,
                 ))
+
+        # the mod's own trees first. They used to be appended after all ~50
+        # base-game ones, so anybody working on a custom-country mod had to
+        # hunt for their own tree at the bottom of the list every time.
+        items.sort(key=lambda item: item[2]["is_vanilla"])
 
         mod_name, tags = self.parse_descriptor(mod_path)
         return {

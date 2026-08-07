@@ -114,8 +114,11 @@ class FocusTreeController:
         view.characters = result["characters"]
         view._icon_library = None
         view._tree_items = result["items"]
-        view.tree_combo["values"] = [item[0] for item in result["items"]]
-        if result["items"]:
+        # through the view's own filter so a 'Mod only' tick that was already
+        # set survives loading another mod
+        labels = view._visible_tree_labels()
+        view.tree_combo["values"] = labels
+        if labels:
             view.tree_combo.current(0)
 
         state.set_mod(

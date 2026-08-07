@@ -8,16 +8,47 @@ the rail by hand costs about a hundred lines and buys a navigation that looks
 like it belongs to the game instead of to Tk.
 """
 
+import json
+import os
 import tkinter as tk
 
 from app import chrome
 from app import glyphs
+from app import recent
 from app import theme
+from app import ui_kit
 
 RAIL_WIDTH = 208
 ITEM_HEIGHT = 34
 SECTION_GAP = 18
 HEADER_HEIGHT = 58
+
+
+#: both canvases here are hand-painted and used to draw only on <Configure>;
+#: see ui_kit for why that left the rail blank but clickable under Wayland
+_repaint_on_becoming_visible = ui_kit.repaint_on_becoming_visible
+
+COLLAPSE_FILE = os.path.join(recent.CONFIG_DIR, "nav_sections.json")
+
+
+def _load_collapsed():
+    """Which rail sections the user folded away, remembered across runs -
+    refolding them on every launch would make the feature not worth using."""
+    try:
+        with open(COLLAPSE_FILE, "r", encoding="utf-8") as handle:
+            titles = json.load(handle)
+    except (OSError, ValueError):
+        return []
+    return [t for t in titles if isinstance(t, str)] if isinstance(titles, list) else []
+
+
+def _save_collapsed(titles):
+    try:
+        os.makedirs(recent.CONFIG_DIR, exist_ok=True)
+        with open(COLLAPSE_FILE, "w", encoding="utf-8") as handle:
+            json.dump(sorted(titles), handle, indent=1)
+    except OSError:
+        pass
 
 
 class HeaderBar(tk.Canvas):
@@ -30,7 +61,7 @@ class HeaderBar(tk.Canvas):
         self.mod_text = ""
         self._home_ids = []
         self._home_hot = False
-        self.bind("<Configure>", lambda e: self._render())
+        _repaint_on_becoming_visible(self, self._render)
         self.bind("<Motion>", self._on_motion)
         self.bind("<Button-1>", self._on_click)
         self.bind("<Leave>", lambda e: self._set_home_hot(False))
@@ -120,7 +151,12 @@ class NavRail(tk.Canvas):
         self.current = None
         self.hover = None
         self._rows = {}          # key -> (top, bottom)
-        self.bind("<Configure>", lambda e: self._render())
+        self._headers = {}       # section title -> (top, bottom), for collapsing
+        # 46 entries is a lot to scan past to reach the one you want. Folding
+        # a section away is the cheapest fix that changes no keys and no
+        # ordering - the shortcuts and the search routing both key off those.
+        self.collapsed = set(_load_collapsed())
+        _repaint_on_becoming_visible(self, self._render)
         self.bind("<Motion>", self._on_motion)
         self.bind("<Button-1>", self._on_click)
         self.bind("<Leave>", lambda e: self._set_hover(None))
@@ -136,11 +172,19 @@ class NavRail(tk.Canvas):
     def _layout(self):
         """Walk the sections once, recording where every row lands."""
         self._rows = {}
+        self._headers = {}
         y = 14
         plan = []
         for title, entries in self.sections:
-            plan.append(("section", (title, len(entries)), y))
+            folded = title in self.collapsed
+            self._headers[title] = (y, y + SECTION_GAP)
+            plan.append(("section", (title, len(entries), folded), y))
             y += SECTION_GAP
+            if folded:
+                # the selected screen still has to be reachable, otherwise
+                # folding its section would strand the user on a page with no
+                # way back to its neighbours
+                entries = [entry for entry in entries if entry[0] == self.current]
             for key, label in entries:
                 self._rows[key] = (y, y + ITEM_HEIGHT)
                 plan.append(("item", (key, label), y))
@@ -159,8 +203,10 @@ class NavRail(tk.Canvas):
 
         for kind, payload, y in plan:
             if kind == "section":
-                title, count = payload
-                self.create_text(16, y + 6, anchor="w", text=title,
+                title, count, folded = payload
+                self.create_text(8, y + 6, anchor="w", text="+" if folded else "-",
+                                 fill=theme.GOLD_DIM, font=(theme.FACE_MONO, 9, "bold"))
+                self.create_text(20, y + 6, anchor="w", text=title,
                                  fill=theme.GOLD_DIM, font=(theme.FACE_UI, 8, "bold"))
                 self.create_text(RAIL_WIDTH - 16, y + 6, anchor="e", text=str(count),
                                  fill=theme.MUTED, font=(theme.FACE_MONO, 8))
@@ -203,8 +249,24 @@ class NavRail(tk.Canvas):
     def _on_motion(self, event):
         self._set_hover(self._key_at(self.canvasy(event.y)))
 
+    def _section_at(self, y):
+        for title, (top, bottom) in self._headers.items():
+            if top <= y <= bottom:
+                return title
+        return None
+
+    def toggle_section(self, title):
+        self.collapsed.symmetric_difference_update({title})
+        _save_collapsed(self.collapsed)
+        self._render()
+
     def _on_click(self, event):
-        key = self._key_at(self.canvasy(event.y))
+        y = self.canvasy(event.y)
+        section = self._section_at(y)
+        if section:
+            self.toggle_section(section)
+            return
+        key = self._key_at(y)
         if key:
             self.on_select(key)
 

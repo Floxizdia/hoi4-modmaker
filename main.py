@@ -36,6 +36,12 @@ from app.icon_coverage_tab import IconCoverageTab
 from app.error_log_tab import ErrorLogTab
 from app.flag_tab import FlagTab
 from app.map_tab import MapTab
+from app.railway_tab import RailwayTab
+from app.scripted_tab import ScriptedTab
+from app.division_tab import DivisionTab
+from app.translation_tab import TranslationTab
+from app.refactor_tab import RefactorTab
+from app.guides_tab import GuidesTab
 from app.code_editor import CodeEditorTab
 from app.tech_tab import TechTab
 from app.music_tab import MusicTab
@@ -61,8 +67,10 @@ from app import theme
 
 SECTIONS = [
     ("VISUAL", [
+        ("guides", "Guides", GuidesTab),
         ("open_mod", "Open Mod", FocusTreeTab),
         ("map", "Map", MapTab),
+        ("railways", "Railways & Supply", RailwayTab),
     ]),
     ("CONTENT", [
         ("settings", "Settings", SettingsTab),
@@ -82,6 +90,7 @@ SECTIONS = [
         ("diplo_action", "Diplomatic Actions", DiploActionTab),
         ("opinion_modifier", "Opinion Modifiers", OpinionModifierTab),
         ("on_action", "On Actions", OnActionTab),
+        ("scripted", "Scripted Effects", ScriptedTab),
         ("peace_modifier", "Peace Conference", PeaceModifierTab),
         ("state_edit", "States", StateTab),
         ("war_goal", "War Goals", WarGoalTab),
@@ -92,6 +101,7 @@ SECTIONS = [
         ("traits", "Traits", TraitTab),
         ("tech", "Tech", TechTab),
         ("units", "Units", UnitsTab),
+        ("divisions", "Divisions", DivisionTab),
         ("oob", "Starting Forces", OobTab),
         ("game_setup", "Game Setup", BookmarkTab),
     ]),
@@ -100,11 +110,13 @@ SECTIONS = [
         ("code", "Code", CodeEditorTab),
         ("loc", "Localisation", LocalisationTab),
         ("loc_coverage", "Loc Coverage", LocCoverageTab),
+        ("translation", "Translation", TranslationTab),
         ("validate", "Validate", ValidatorTab),
         ("icon_coverage", "Icon Coverage", IconCoverageTab),
-        ("error_log", "Error Log", ErrorLogTab),
+        ("error_log", "Test Play & Errors", ErrorLogTab),
         ("diff", "What Changed?", DiffTab),
         ("replace", "Find & Replace", BulkReplaceTab),
+        ("refactor", "Refactor", RefactorTab),
         ("compat", "Compatibility", CompatTab),
         ("load_order", "Load Order", LoadOrderTab),
     ]),
@@ -116,6 +128,13 @@ SECTIONS = [
 # a modder looking for "the focus tree tool" finds it under the name that
 # says so, without splitting one editor's state across two half-built tabs.
 TAB_ALIASES = {"focus": "open_mod"}
+
+#: What Ctrl+1..9 open, written out instead of taken from the order of
+#: SECTIONS. Deriving them from the list meant that inserting one screen
+#: silently remapped every shortcut - the kind of change that breaks a
+#: user's muscle memory without producing a single error message.
+SHORTCUT_KEYS = ["open_mod", "map", "railways", "settings", "stats",
+                 "focus", "tree_diff", "events", "event_chain"]
 
 
 class App(tk.Tk):
@@ -147,6 +166,12 @@ class App(tk.Tk):
         self._auto_snap_on = False
         self._auto_snap_minutes = 15
         self._auto_snap_job = None
+
+        # a test run that was interrupted (app closed while the game was
+        # still up) leaves the launcher holding only the test mod; put the
+        # user's own selection back before anything else happens
+        from app import test_play
+        test_play.restore_pending()
 
         self.home = HomeScreen(self, on_new_mod=self._show_new_mod, on_open_mod=self._show_open_mod)
         self.home.pack(fill="both", expand=True)
@@ -196,8 +221,8 @@ class App(tk.Tk):
         self.bind_all("<Control-Shift-Key-Z>", self._redo)
         self.bind_all("<Control-f>", self._focus_search)
         self.bind_all("<Control-s>", self._save_current)
-        for i in range(1, min(10, len(self._flat_keys) + 1)):
-            self.bind_all(f"<Control-Key-{i}>", lambda e, k=self._flat_keys[i - 1]: self.show(k))
+        for i, key in enumerate(SHORTCUT_KEYS[:9], start=1):
+            self.bind_all(f"<Control-Key-{i}>", lambda e, k=key: self.show(k))
         self.protocol("WM_DELETE_WINDOW", self._on_close)
 
     def _tab(self, key):

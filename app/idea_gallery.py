@@ -64,7 +64,7 @@ class IdeaGalleryTab(ttk.Frame):
         self.canvas.pack(side="left", fill="both", expand=True)
         bar.pack(side="right", fill="y")
         self.canvas.bind("<MouseWheel>", lambda e: self.canvas.yview_scroll(-1 * (e.delta // 120), "units"))
-        self.canvas.bind("<Configure>", lambda e: self._render())
+        ui_kit.repaint_on_becoming_visible(self.canvas, self._render)
 
         self.on_mod_changed()
 

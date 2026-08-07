@@ -393,6 +393,56 @@ def warning_glyph(canvas, x, y, s, colour, w=1.6):
     return ids
 
 
+def rail_glyph(canvas, x, y, s, colour, w=1.6):
+    """Two rails and their sleepers - the railway/supply network."""
+    ids = [_line(canvas, colour, w, x + s * 0.28, y + s * 0.08, x + s * 0.28, y + s * 0.92),
+           _line(canvas, colour, w, x + s * 0.72, y + s * 0.08, x + s * 0.72, y + s * 0.92)]
+    for ty in (0.24, 0.50, 0.76):
+        ids.append(_line(canvas, colour, w, x + s * 0.14, y + s * ty, x + s * 0.86, y + s * ty))
+    return ids
+
+
+def braces_glyph(canvas, x, y, s, colour, w=1.8):
+    """A pair of braces - a named block of script."""
+    ids = []
+    for sign, sx in ((1, 0.34), (-1, 0.66)):
+        ids.append(canvas.create_line(
+            x + s * (sx + sign * 0.12), y + s * 0.10,
+            x + s * sx, y + s * 0.30, x + s * sx, y + s * 0.44,
+            x + s * (sx - sign * 0.10), y + s * 0.50,
+            x + s * sx, y + s * 0.56, x + s * sx, y + s * 0.70,
+            x + s * (sx + sign * 0.12), y + s * 0.90,
+            fill=colour, width=w, smooth=False))
+    return ids
+
+
+def grid_glyph(canvas, x, y, s, colour, w=1.6):
+    """A filled block grid - a division template's regiment layout."""
+    ids = []
+    for column in range(3):
+        for row in range(3):
+            left = x + s * (0.10 + column * 0.29)
+            top = y + s * (0.10 + row * 0.29)
+            ids.append(canvas.create_rectangle(
+                left, top, left + s * 0.20, top + s * 0.20,
+                outline=colour, width=w,
+                fill=colour if row < 2 else ""))
+    return ids
+
+
+def translate_glyph(canvas, x, y, s, colour, w=1.6):
+    """An A beside a character block with an arrow - translation."""
+    ids = [_line(canvas, colour, w, x + s * 0.06, y + s * 0.62, x + s * 0.24, y + s * 0.14),
+           _line(canvas, colour, w, x + s * 0.24, y + s * 0.14, x + s * 0.42, y + s * 0.62),
+           _line(canvas, colour, w, x + s * 0.13, y + s * 0.44, x + s * 0.35, y + s * 0.44),
+           _line(canvas, colour, w, x + s * 0.20, y + s * 0.82, x + s * 0.80, y + s * 0.82),
+           _line(canvas, colour, w, x + s * 0.66, y + s * 0.70, x + s * 0.80, y + s * 0.82),
+           _line(canvas, colour, w, x + s * 0.66, y + s * 0.94, x + s * 0.80, y + s * 0.82)]
+    ids.append(canvas.create_rectangle(x + s * 0.56, y + s * 0.10, x + s * 0.94, y + s * 0.52,
+                                       outline=colour, width=w, fill=""))
+    return ids
+
+
 GLYPHS = {
     "open_mod": map_glyph,
     "map": globe_glyph,
@@ -436,6 +486,12 @@ GLYPHS = {
     "icon_coverage": search_glyph,
     "load_order": layers_glyph,
     "error_log": warning_glyph,
+    "refactor": swap_glyph,
+    "guides": compass_glyph,
+    "railways": rail_glyph,
+    "scripted": braces_glyph,
+    "divisions": grid_glyph,
+    "translation": translate_glyph,
     # aliases for callers outside the nav rail
     "target": target_glyph,
     "globe": globe_glyph,

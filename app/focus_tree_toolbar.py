@@ -23,6 +23,21 @@ class FocusTreeToolbar(ttk.Frame):
             on_zoom, on_mode_changed, on_help,
         )
 
+    def _on_mod_only_changed(self):
+        """Re-apply the filter through the same path typing uses, so the
+        checkbox and the search box compose instead of fighting.
+
+        The box holds a chosen entry's full label once a tree is picked, and
+        reading that back as a search term narrowed the list to the single
+        item already selected. `current()` is what tells the two apart: it
+        is the entry's index for a selection and -1 for text the user typed.
+        """
+        labels = self._tree_labels()
+        typed = self.tree_combo.current() < 0
+        needle = self.tree_combo.get().strip().lower() if typed else ""
+        self.tree_combo["values"] = (
+            [label for label in labels if needle in label.lower()] if needle else labels)
+
     @staticmethod
     def _separator(parent):
         ttk.Frame(parent, style="FocusTree.Sash.TFrame", width=1).pack(
@@ -59,6 +74,13 @@ class FocusTreeToolbar(ttk.Frame):
         ttk.Button(picker, text="Load", style="FocusTree.Primary.TButton", command=on_load_tree).pack(
             side="left"
         )
+        # a mod with entirely custom countries still lists all ~50 base-game
+        # trees, and finding your own among them every time is the single
+        # most repeated annoyance on this screen
+        self.mod_only_var = tk.BooleanVar(value=False)
+        ttk.Checkbutton(picker, text="Mod only", variable=self.mod_only_var,
+                        command=self._on_mod_only_changed,
+                        style="FocusTree.TCheckbutton").pack(side="left", padx=(6, 0))
         self._separator(picker)
         ttk.Label(picker, text="COUNTRY", style="FocusTree.Eyebrow.TLabel").pack(side="left")
         self.tag_var = tk.StringVar()
@@ -140,8 +162,9 @@ class FocusTreeActionBar(ttk.Frame):
 
     def __init__(self, parent, *, on_add, on_copy_branch, on_shift_branch, on_tidy,
                  on_export_png, on_save_moved, on_icon_library, on_export_additions,
-                 on_play_export, on_publish):
+                 on_play_export, on_publish, on_import_drawio=None):
         super().__init__(parent, style="FocusTree.ActionBar.TFrame", padding=(12, 7, 12, 0))
+        self._on_import_drawio = on_import_drawio
         self._build(
             on_add, on_copy_branch, on_shift_branch, on_tidy, on_export_png,
             on_save_moved, on_icon_library, on_export_additions, on_play_export, on_publish,
@@ -156,8 +179,11 @@ class FocusTreeActionBar(ttk.Frame):
             ("Shift Branch...", on_shift_branch, 0), ("Tidy Tree", on_tidy, 6),
             ("Export PNG", on_export_png, 0), ("Save Moved", on_save_moved, 0),
             ("Icon Library", on_icon_library, 6), ("Export New Focuses", on_export_additions, 0),
+            ("Import Draw.io...", self._on_import_drawio, 6),
             ("Play in HOI4...", on_play_export, 6), ("Publish Prep...", on_publish, 0),
         ):
+            if callback is None:
+                continue
             ttk.Button(commands, text=text, style="FocusTree.Action.TButton", command=callback).pack(
                 side="left", padx=(padx, 0)
             )

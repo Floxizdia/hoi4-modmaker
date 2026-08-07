@@ -38,6 +38,29 @@ TOKEN_RES = [
 ]
 
 
+def open_in_code(widget, path, line=None):
+    """Send another tab's finding to the Code screen and jump to its line.
+
+    Callers used to guard with `"code" in app.tabs`, but tabs are built
+    lazily on first visit - so that check was False for anyone who hadn't
+    already opened the Code screen, and the jump silently did nothing.
+    `show` is what constructs it, so ask for the screen first and read the
+    tab back afterwards. Returns True when the file was actually opened.
+    """
+    app = widget.winfo_toplevel()
+    if not (hasattr(app, "show") and hasattr(app, "tabs")):
+        return False
+    app.show("code")
+    tab = app.tabs.get("code")
+    # show() can be refused - an unsaved generator tab asks to confirm
+    # first, and leaving the user on that tab while loading a file into a
+    # hidden one would be worse than doing nothing
+    if tab is None or getattr(app, "current_key", None) != "code":
+        return False
+    tab.open_file(path, line=line)
+    return True
+
+
 class CodeEditorTab(ttk.Frame):
     def __init__(self, master):
         super().__init__(master, padding=8)

@@ -578,11 +578,12 @@ class ModBrowserTab(ttk.Frame):
             "save_moved": self._save_moved,
             "icon_library": self._open_icon_library,
             "export_additions": self._export_additions,
+            "import_drawio": self._import_drawio,
             "play_export": self._open_play_export,
             "publish": self._open_publish,
         }
         self.focus_tree_view = FocusTreeView(
-            self, tree_labels=lambda: [item[0] for item in self._tree_items], callbacks=callbacks,
+            self, tree_labels=self._visible_tree_labels, callbacks=callbacks,
         )
         self.focus_tree_view.pack(fill="both", expand=True)
         self.toolbar = self.focus_tree_view.toolbar
@@ -618,6 +619,42 @@ class ModBrowserTab(ttk.Frame):
         self._editing_id = None
         self._workshop_mods = []
         self._refresh_workshop_mods()
+
+    # ---- tree picker ----
+
+    def _visible_tree_labels(self):
+        """Tree labels for the picker, honouring the 'Mod only' tick.
+
+        Routed through here rather than filtered in the toolbar so the tick
+        and the type-to-search filter stack on top of each other instead of
+        each resetting the other's work.
+        """
+        mod_only = getattr(getattr(self, "toolbar", None), "mod_only_var", None)
+        items = self._tree_items
+        if mod_only is not None and mod_only.get():
+            items = [item for item in items if not item[2].get("is_vanilla")]
+        return [item[0] for item in items]
+
+    def _import_drawio(self):
+        """Turn a Draw.io diagram into a focus tree skeleton."""
+        if not self.mod_root:
+            messagebox.showerror("No mod", "Load a mod first — the tree has to be written "
+                                           "into one.")
+            return
+        from app.drawio_dialog import DrawioImportDialog
+
+        def done(path, count):
+            self.toolbar.status.config(
+                text=f"Imported {count} focus(es) into {os.path.basename(path)}. "
+                     "Pick it in the Tree list and press Load to see it.")
+            self._refresh_tree_files()
+
+        DrawioImportDialog(self, self.mod_root, on_imported=done)
+
+    def _refresh_tree_files(self):
+        """Re-scan the mod for focus tree files after one was added."""
+        from app import mod_loader as ml
+        self.tree_files = ml.find_focus_tree_files(self.mod_root)
 
     # ---- mod loading ----
 

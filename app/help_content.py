@@ -29,11 +29,162 @@ HELP = {
             "SELECT picks/moves a focus, LINK draws a new prerequisite between two focuses you "
             "click in order, ADD opens the new-focus dialog at wherever you click, PAN lets you "
             "drag anywhere to scroll instead of interacting with focuses.",
+            "'Import Draw.io...' turns a diagram you already drew into a tree: boxes become "
+            "focuses, arrows become prerequisites, and boxes that line up in the drawing line "
+            "up in the tree. It reads both the compressed .drawio default and plain XML. A "
+            "diagram can't say which end of an arrow is the prerequisite, so check the preview "
+            "and use the flip switch if it reads backwards. Icons, costs and rewards are left "
+            "blank for you to fill in here afterwards.",
             "Nothing is written to disk until you use one of the bottom-bar actions: 'Save Moved' "
             "(writes new x/y for focuses you dragged), 'Export New Focuses' (writes any focus you "
             "added), or 'Play in HOI4...' (copies the whole mod into your game's mod folder so "
             "you can actually launch it).",
         ],
+    },
+    "guides": {
+        "title": "Guides",
+        "what": "What a real modding job actually takes, in order, with each step opening the "
+                "screen it needs. There are 46 screens and each does its own job well, but none "
+                "of them can tell you which OTHER screens a job needs - 'add a country that "
+                "joins the Axis' is five of them, and knowing that is the difference between "
+                "getting somewhere and giving up.",
+        "how": [
+            "Pick a job on the left. The steps appear on the right in the order they have to "
+            "happen, each with a button that opens the screen for it.",
+            "Tick steps off as you go. Ticks are remembered per mod, so coming back to a mod "
+            "next week tells you where you stopped.",
+            "This is a layer on top, not a replacement: every screen is still in the rail, and "
+            "the keyboard shortcuts are unchanged.",
+        ],
+        "example": "Add a brand-new country\n"
+                   "  1. Create the tag           -> Country\n"
+                   "  2. Draw or pick a flag      -> Flags\n"
+                   "  3. Give it land             -> Map\n"
+                   "  4. Set what it starts with  -> Starting Forces\n"
+                   "  5. Give it a focus tree     -> Focus Tree",
+    },
+    "refactor": {
+        "title": "Refactor",
+        "what": "Renames a content id everywhere it is used - script references and localisation "
+                "keys together. Every other screen here adds content; this changes content that "
+                "already exists, which is what stops a big mod becoming too risky to touch. A "
+                "missed reference doesn't crash the game or reach error.log: the focus just "
+                "quietly never unlocks, which is the worst kind of bug to hunt.",
+        "how": [
+            "Type the id (or press 'List ids' to pick one) and what to rename it to, then press "
+            "Preview. Nothing is written yet - you get every line that would change, script and "
+            "localisation side by side. Double-click a row to open that file in the Code screen.",
+            "Only whole-token matches count, so renaming 'my_focus' never touches 'my_focus_two' "
+            "and renaming 'germany.1' never touches 'germany.14'. This is what makes it different "
+            "from Find & Replace.",
+            "Localisation keys derived from the id move with it - my_focus_desc, germany.1.t, "
+            "germany.1.a - but the English text is left alone, even when it mentions the id.",
+            "If the new name is already used somewhere the preview says so in red: renaming onto "
+            "an existing name merges two pieces of content into one.",
+            "Press Apply to write it. Every changed file keeps a one-time .bak and the whole "
+            "rename is one Ctrl+Z away. A file edited between preview and apply is skipped "
+            "rather than rewritten from line numbers that no longer match.",
+            "Switch to 'delete it' to remove something instead. The definition block and the "
+            "localisation keys go; references from elsewhere are listed in red and left alone "
+            "on purpose - a reference sits inside somebody else's effect block, and cutting the "
+            "line out can quietly change what that block does. Fix those yourself afterwards.",
+        ],
+        "example": "my_focus -> great_reform\n"
+                   "  common/national_focus/tree.txt:4   id = my_focus\n"
+                   "  common/national_focus/tree.txt:8   prerequisite = { focus = my_focus }\n"
+                   "  localisation/english/t_l_english.yml:2   my_focus:0 \"Reform\"",
+    },
+    "translation": {
+        "title": "Translation",
+        "what": "Every localisation key with its English text beside the target language, so a "
+                "mod can be translated in one place. Loc Coverage answers 'which keys is this "
+                "language missing' and can bulk-copy the English across so nobody sees a raw "
+                "key on screen; this is where those placeholders become actual translations.",
+        "how": [
+            "Pick a language and press Load. 'Only untranslated' hides the rows that are done.",
+            "A key counts as untranslated when it has no text OR its text is still exactly the "
+            "English - which is what a bulk-copied placeholder looks like, so coverage alone "
+            "can't tell you what still needs doing.",
+            "Select a row, type the translation, press Enter. That applies it and moves to the "
+            "next row, so a run of keys can be worked through without touching the mouse.",
+            "Nothing is written until 'Save to mod'. Translations go into a file of this "
+            "screen's own, named so it loads AFTER the mod's other localisation files - a "
+            "language folder loads alphabetically and the last definition of a key wins, so a "
+            "file that sorts early would be overridden by the placeholder it replaces.",
+        ],
+        "example": 'l_french:\n TUR_focus_a:0 "Reformer l\'armee"',
+    },
+    "divisions": {
+        "title": "Divisions",
+        "what": "Builds a division_template - the regiment and support layout a country actually "
+                "fields - on the game's own 5x5 grid, and writes it into an OOB file in "
+                "history/units. The Units tab edits what a battalion IS; this decides how they "
+                "are stacked into a division.",
+        "how": [
+            "Press 'Load battalions' to fill the dropdowns from the mod's and base game's "
+            "common/units files. Line battalions go in the grid, support companies in the five "
+            "support slots - the tool keeps them apart and says so if one is in the wrong place.",
+            "Fill a column from the top down. A gap in a column makes the game drop everything "
+            "below it, so that is flagged too.",
+            "Combat width counts regiments only - support companies add none, which is why a "
+            "40-width template can still carry five of them. Organisation is the average across "
+            "battalions, not the total, exactly as the game computes it.",
+            "Attack and defence aren't shown: a line battalion gets those from its equipment, "
+            "and the numbers in a support company's file are multipliers rather than values to "
+            "add up.",
+            "'Add to file' puts the template at the TOP of the chosen OOB file, because the game "
+            "reads it in order and won't find a template defined below the units that use it.",
+        ],
+        "example": "division_template = {\n\tname = \"Infantry Division\"\n\n\tregiments = {\n"
+                   "\t\tinfantry = { x = 0 y = 0 }\n\t\tinfantry = { x = 0 y = 1 }\n\t}\n\n"
+                   "\tsupport = {\n\t\tengineer = { x = 0 y = 0 }\n\t}\n}",
+    },
+    "scripted": {
+        "title": "Scripted Effects & Triggers",
+        "what": "Named blocks of script you write once and then call by name from focuses, "
+                "events, decisions and AI - common/scripted_effects and "
+                "common/scripted_triggers - plus dynamic modifiers "
+                "(common/dynamic_modifiers), the country or state modifiers a script can hand "
+                "out and take back later. Everywhere else in this app can reference these; "
+                "this is the screen that defines them.",
+        "how": [
+            "Pick the kind, give it a name with no spaces, and write the body: effects for a "
+            "scripted effect, conditions for a scripted trigger, modifier lines for a dynamic "
+            "modifier.",
+            "The list on the left is every definition the base game and this mod already have. "
+            "The note beside the name box says whether your name is free.",
+            "These files are NOT additive, unlike on_actions: two definitions of one name means "
+            "the last loaded wins. Reusing a base-game name replaces vanilla's version "
+            "everywhere it is used, so the tool asks before letting you do it.",
+            "Call a scripted effect or trigger by writing 'its_name = yes'. Hand out a dynamic "
+            "modifier with add_dynamic_modifier = { modifier = its_name }.",
+        ],
+        "example": "my_war_check = {\n\thas_war = yes\n\thas_stability < 0.4\n}\n\n"
+                   "(then in a focus: available = { my_war_check = yes })",
+    },
+    "railways": {
+        "title": "Railways & Supply",
+        "what": "The railway network and supply nodes drawn on the map. Supply in HOI4 flows out "
+                "of a supply node and along railways, so a mod that adds states or redraws a "
+                "front has to connect them or divisions there simply starve. Both live in "
+                "map/railways.txt and map/supply_nodes.txt as bare province ids with no "
+                "coordinates, which is why they're painful to edit by hand.",
+        "how": [
+            "Press 'Load Map'. Existing railways are drawn as lines (thicker = higher level) and "
+            "supply nodes as blue dots. If the mod has no railway file of its own, the base "
+            "game's is loaded as the starting point.",
+            "In 'draw railway' mode, click each province the line runs through in order, then "
+            "press 'Finish line'. 'Undo point' takes back the last click.",
+            "Clicking a province that already has a railway selects that line instead - then the "
+            "Level spinbox retypes it, or 'Delete selected' removes it.",
+            "In 'supply nodes' mode a click adds a node on that province, or removes the one "
+            "that's there.",
+            "Nothing touches disk until you press Save: a half-drawn line written out would be "
+            "a broken railway in the file. Existing files are kept as .bak.",
+        ],
+        "example": "3 4 6521 11444 3312 6282\n(a level 3 railway running through four provinces - "
+                   "the 4 is the count, and this tool always recomputes it so it can't drift out "
+                   "of step with the ids)",
     },
     "map": {
         "title": "Map",
@@ -74,8 +225,9 @@ HELP = {
             "of an empty tree.",
             "Snapshots: 'Take Snapshot' zips every script/localisation/interface file (not "
             "textures - those would make snapshots huge) with a timestamp. 'Restore Selected' "
-            "unpacks a chosen one back over the mod, overwriting current files - take a fresh "
-            "snapshot first if you might want to undo the restore itself.",
+            "unpacks a chosen one back over the mod, overwriting current files. Restoring the "
+            "wrong one isn't fatal: the mod's current state is snapshotted as 'before-restore' "
+            "first, so restoring that one puts everything back.",
             "'Changelog vs Selected...' compares the mod's current state against an older "
             "snapshot and lists every focus/event/decision/idea added, removed or changed - "
             "handy for writing a Steam Workshop update description without doing it by hand.",
@@ -107,6 +259,7 @@ HELP = {
             "mod you can see which specific step is slow instead of just 'the tool feels "
             "sluggish'.",
         ],
+        "example": "focuses     412\nevents      188\ndecisions    64\nideas        37\nloc keys  1,466\n\n# a quick sense of scale, and of what a release note should mention",
     },
     "focus": {
         "title": "Focus Tree",
@@ -150,6 +303,7 @@ HELP = {
             "re-running auto-layout) didn't accidentally rewrite prerequisites you didn't mean "
             "to touch.",
         ],
+        "example": "ADDED     tur_reform_army\nCHANGED   tur_industry     cost 70 -> 35\nREMOVED   tur_old_focus\n\n# focus-level, not text-level - use What Changed? for raw lines",
     },
     "events": {
         "title": "Events",
@@ -195,6 +349,7 @@ HELP = {
             "you think it does, and finding orphaned events (defined but never referenced by "
             "anything) that might be dead content.",
         ],
+        "example": "tur.1  ->  tur.2  ->  tur.5\n           ->  tur.3\n\n# which events fire which; only events that take part in a chain are listed",
     },
     "decisions": {
         "title": "Decisions",
@@ -250,6 +405,8 @@ HELP = {
             "game alone has hundreds of ideas).",
             "Click an entry to see its full modifier block and where it's defined - useful as a "
             "reference for 'what values are normal' when writing your own.",
+            "This screen is read-only. To write one, use the Ideas screen - this is for seeing "
+            "what already exists and what values are normal before you do.",
         ],
     },
     "country": {
@@ -274,6 +431,7 @@ HELP = {
             "starting leader character entry, and localisation. The country owns zero territory "
             "afterward; give it the capital state (or others) via the Map tab or a focus/decision.",
         ],
+        "example": "# common/country_tags/01_countries.txt\nTUR = \"countries/Turkey.txt\"\n\n# common/countries/Turkey.txt\ngraphical_culture = eastern_european_gfx\ncolor = { 120 30 40 }",
     },
     "flags": {
         "title": "Flags",
@@ -290,6 +448,7 @@ HELP = {
             "write all three real sizes at once - you never have to make the medium/small "
             "versions by hand.",
         ],
+        "example": "gfx/flags/TUR.tga            # the country's flag\ngfx/flags/TUR_communism.tga  # one per ideology it can turn into\ngfx/flags/medium/TUR.tga     # the launcher also wants the small sizes\ngfx/flags/small/TUR.tga",
     },
     "ideology": {
         "title": "Ideologies",
@@ -306,6 +465,7 @@ HELP = {
             "This feeds the 'Ruling ideology' dropdown everywhere else in the app - once "
             "created, it shows up as a normal option in Country, Decisions, Ideas, and so on.",
         ],
+        "example": "my_ideology = {\n\ttypes = {\n\t\tmy_subtype = { }\n\t}\n\tdynamic_faction_names = { \"FACTION_NAME_MY\" }\n\tcolor = { 120 60 160 }\n\trules = { can_force_government = yes }\n}",
     },
     "factions": {
         "title": "Factions",
@@ -319,7 +479,10 @@ HELP = {
             "Reference the faction's name from a focus or decision's effect (e.g. "
             "create_faction / add_to_faction) to actually form it during play - this tab defines "
             "the template, not the moment it's created.",
+            "The faction's on-screen name comes from localisation, not from the template: "
+            "without a key matching its name, the alliance shows in game as a raw id.",
         ],
+        "example": "# the template is defined here, then formed by a focus:\ncompletion_reward = {\n\tcreate_faction = \"MY_PACT\"\n\tGER = { add_to_faction = ROOT }\n}",
     },
     "ai_strategy": {
         "title": "AI Strategy",
@@ -350,7 +513,11 @@ HELP = {
             "Write the effects for both outcomes - what happens if the target accepts, and "
             "separately what happens if they decline - these are genuinely different effect "
             "blocks, not one effect with a condition inside it.",
+            "The action needs localisation for its button and tooltip, and it only appears for "
+            "countries whose 'visible' trigger passes - a new action that never shows up is "
+            "almost always a trigger that is false, not a missing file.",
         ],
+        "example": "my_action = {\n\trequires_acceptance = yes\n\tcost = 25\n\tallowed = { always = yes }\n\ton_accept = { ROOT = { add_stability = 0.05 } }\n\ton_decline = { ROOT = { add_political_power = -20 } }\n}",
     },
     "opinion_modifier": {
         "title": "Opinion Modifiers",
@@ -364,6 +531,9 @@ HELP = {
             "Leave duration blank for a permanent modifier that only your own effects can remove "
             "later, or set months + a decay rate for one that fades on a timer without any extra "
             "script.",
+            "Defining one changes nothing on its own. Something has to grant it: "
+            "add_opinion_modifier = { target = GER modifier = my_modifier } from a focus, event "
+            "or decision.",
         ],
         "example": 'temporary_nap_signed = {\n\tvalue = 25\n\tmonths = 24\n\tdecay = 1\n}',
     },
@@ -380,7 +550,11 @@ HELP = {
             "This is additive by design: adding a hook to on_declare_war never overwrites "
             "another mod's hook on the same token, so two mods' on-action effects both run "
             "instead of one silently replacing the other.",
+            "There is no 'undo' hook. If your effect should only run once, set a country flag "
+            "in it and check that flag at the top - otherwise it runs every single time that "
+            "moment happens, which for on_daily is every day of the game.",
         ],
+        "example": "on_actions = {\n\ton_declare_war = {\n\t\teffect = {\n\t\t\tROOT = { add_war_support = 0.05 }\n\t\t}\n\t}\n}",
     },
     "peace_modifier": {
         "title": "Peace Conference",
@@ -393,7 +567,14 @@ HELP = {
             "Pick which of the 4 fixed action types you're tuning, then add cost modifiers "
             "keyed to triggers - e.g. cheaper to take states from a country you're at war with, "
             "more expensive to liberate a country with high war support.",
+            "This only changes what an action costs, never what actions exist. If you wanted a "
+            "new kind of peace deal, that is not moddable - the four types are fixed by the "
+            "engine.",
+            "Costs are multiplied together, so two modifiers that both apply stack: a 0.5 and a "
+            "0.5 make the action a quarter of its base price, not half. Test the combination "
+            "you actually expect rather than each modifier on its own.",
         ],
+        "example": "take_states_cost = {\n\tbase = 1.0\n\tmodifier = {\n\t\tfactor = 0.5\n\t\tFROM = { has_war_with = ROOT }\n\t}\n}",
     },
     "state_edit": {
         "title": "States",
@@ -414,6 +595,7 @@ HELP = {
             "'Pick province on map...' opens a map zoomed to the state you're editing, so you "
             "click the province instead of hunting for its id.",
         ],
+        "example": "state = {\n\tid = 341\n\tmanpower = 850000\n\tstate_category = large_city\n\tresources = { steel = 12 }\n\thistory = {\n\t\towner = TUR\n\t\tadd_core_of = TUR\n\t\tbuildings = {\n\t\t\tinfrastructure = 5\n\t\t\t1234 = { naval_base = 3 }\n\t\t}\n\t\tvictory_points = { 1234 10 }\n\t}\n\tprovinces = { 1234 1235 }\n}",
     },
     "war_goal": {
         "title": "War Goals",
@@ -429,6 +611,8 @@ HELP = {
             "generate_per_state_cost (scales with how many states are being taken) - together "
             "these are what makes demanding half a continent costlier than demanding one "
             "border state.",
+            "The war goal still has to be reachable: a country needs a way to justify it, "
+            "normally through a focus or decision that calls add_named_wargoal.",
         ],
         "example": 'my_wargoal = {\n\twar_name = MY_WAR\n\ttake_states = { }\n\tgenerate_base_cost = 100\n\tthreat = 1\n}',
     },
@@ -443,7 +627,10 @@ HELP = {
             "given country at all.",
             "Once created, this category immediately shows up as a pickable option in the "
             "Decisions tab's category dropdown.",
+            "The category's on-screen name comes from localisation. Add a key with the same id "
+            "(and '_desc' for its tooltip) or the tab shows as a raw id.",
         ],
+        "example": "my_decisions = {\n\ticon = generic_research\n\tpriority = 100\n\tvisible = {\n\t\ttag = TUR\n\t}\n}",
     },
     "equipment": {
         "title": "Equipment",
@@ -459,7 +646,10 @@ HELP = {
             "After creating, paste the shown id into a technology's enable_equipments block "
             "(the exact line to paste is shown right after you create the tier) so researching "
             "that tech is what unlocks it.",
+            "A tier nothing researches is invisible in game. Until some technology lists it in "
+            "enable_equipments, the new gear can never be produced.",
         ],
+        "example": "infantry_equipment_5 = {\n\tarchetype = infantry_equipment\n\tparent = infantry_equipment_4\n\tyear = 1945\n\tsoft_attack = 8\n\tdefense = 26\n}\n\n# then in a technology:\nenable_equipments = { infantry_equipment_5 }",
     },
     "agency_upgrade": {
         "title": "Agency Upgrades",
@@ -474,7 +664,11 @@ HELP = {
             "completes, level 2's modifier applies (usually stacking) once that level "
             "completes, and so on - matching exactly how the base game's own agency upgrades "
             "scale.",
+            "Each level needs its own modifier block. A branch with only level_1 filled in "
+            "stops giving anything once the player levels it up, which reads in game as a "
+            "broken upgrade.",
         ],
+        "example": "operation = {\n\tmy_upgrade = {\n\t\tpicture = GFX_idea_unknown\n\t\tai_will_do = { factor = 1 }\n\t\tlevel_1 = { operative_slot = 1 }\n\t\tlevel_2 = { operative_slot = 1 }\n\t}\n}",
     },
     "characters": {
         "title": "Characters",
@@ -492,6 +686,7 @@ HELP = {
             "matched to a character by filename (e.g. TUR_ataturk.png matches the character id "
             "TUR_ataturk) and auto-resized to the game's real portrait size.",
         ],
+        "example": "characters = {\n\tTUR_my_leader = {\n\t\tname = TUR_my_leader\n\t\tportraits = { civilian = { large = GFX_portrait_TUR_my_leader } }\n\t\tcountry_leader = {\n\t\t\tideology = neutrality_subtype\n\t\t\ttraits = { }\n\t\t}\n\t}\n}",
     },
     "traits": {
         "title": "Traits",
@@ -503,6 +698,9 @@ HELP = {
             "Filter by role (country leader, corps commander, etc.) or search by name.",
             "Click a trait to see its full modifier block - useful as a sanity check for what "
             "values are 'normal' for a given trait tier before you write your own.",
+            "This screen is read-only. Traits are written on the screen for whatever uses them "
+            "(characters, advisors); this is the library you check first so you don't invent a "
+            "duplicate of something the base game already has.",
         ],
     },
     "tech": {
@@ -516,7 +714,11 @@ HELP = {
             "Add or edit a technology: id, icon, cost in research weeks, prerequisite techs, and "
             "what it unlocks - either equipment (paste an equipment tier's id here) or a raw "
             "effect for bonuses that aren't equipment.",
+            "A technology's name and description come from localisation, and its position comes "
+            "from the folder block - a tech with no folder entry is researched-but-invisible, "
+            "which looks exactly like the tech not existing.",
         ],
+        "example": "my_tech = {\n\tenable_equipments = { infantry_equipment_5 }\n\tresearch_cost = 2\n\tstart_year = 1940\n\tpath = { leads_to_tech = other_tech research_cost_coeff = 1 }\n\tfolder = { name = infantry_folder position = { x = 2 y = 4 } }\n}",
     },
     "units": {
         "title": "Units",
@@ -530,6 +732,9 @@ HELP = {
             "Most mods won't need to add a brand new unit type (that needs matching 3D/2D "
             "assets); this tab is mainly for confirming what stats an existing unit type has "
             "before building Equipment tiers or OOB templates around it.",
+            "This screen is mostly read-only in practice. Adding a genuinely new unit type "
+            "needs 3D and 2D assets this tool cannot generate, so use it to check an existing "
+            "type's stats before building Equipment tiers or division templates around it.",
         ],
     },
     "oob": {
@@ -559,6 +764,7 @@ HELP = {
             "auto-edit that file, since it already has real content and guessing where to splice "
             "a line in is exactly the kind of edit that corrupts a file quietly.",
         ],
+        "example": "# history/units/TUR_1936.txt\ndivision_template = {\n\tname = \"Piyade Tumeni\"\n\tregiments = {\n\t\tinfantry = { x = 0 y = 0 }\n\t}\n}\n\nunits = {\n\tdivision = {\n\t\tname = \"1. Piyade\"\n\t\tlocation = 1234\n\t\tdivision_template = \"Piyade Tumeni\"\n\t}\n}",
     },
     "game_setup": {
         "title": "Game Setup",
@@ -571,7 +777,10 @@ HELP = {
             "Most total-conversion mods only need one bookmark (their own start date); "
             "alternate-history mods sometimes add several for different starting points in the "
             "same timeline.",
+            "A bookmark that lists no countries still loads, but the player sees an empty "
+            "selection screen - every scenario needs at least its featured tags filled in.",
         ],
+        "example": "bookmarks = {\n\tbookmark = {\n\t\tname = \"MY_START_NAME\"\n\t\tdesc = \"MY_START_DESC\"\n\t\tdate = 1936.1.1.12\n\t\tdefault_country = \"TUR\"\n\t\tTUR = { history = TUR_DESC ideology = neutrality }\n\t}\n}",
     },
     "music": {
         "title": "Music",
@@ -585,7 +794,11 @@ HELP = {
             "The actual audio files still need converting to the game's expected format/bitrate "
             "separately - this tab writes the script that references them, not the audio "
             "conversion itself.",
+            "The tracks also need registering in a .asset file and the audio converting to the "
+            "format the game expects. This screen writes the script that refers to them; it "
+            "does not convert audio.",
         ],
+        "example": "my_track = {\n\tmusic = {\n\t\tsong = \"my_track\"\n\t\tchance = {\n\t\t\tmodifier = { factor = 2 has_war = yes }\n\t\t}\n\t}\n}",
     },
     "code": {
         "title": "Code",
@@ -599,6 +812,8 @@ HELP = {
             "Standard find, and save-in-place - every save still goes through the same "
             "undo-history mechanism as the visual tabs, so Ctrl+Z can undo a hand-edit made here "
             "too.",
+            "Saving here goes through the same undo history and .bak backup as the visual "
+            "screens, so a hand-edit made here is still one Ctrl+Z away.",
         ],
     },
     "loc": {
@@ -615,6 +830,7 @@ HELP = {
             "languages) can also copy English text into other language files as a placeholder "
             "so nothing shows as a missing key, ready for real translation later.",
         ],
+        "example": "l_english:\n TUR_my_focus:0 \"Reform the Army\"\n TUR_my_focus_desc:0 \"A long overdue modernisation.\"\n\n# the file must be UTF-8 WITH a BOM, and the name must end _l_english.yml",
     },
     "loc_coverage": {
         "title": "Loc Coverage",
@@ -633,6 +849,7 @@ HELP = {
             "players included. It writes readable placeholder text (GER_four_year_plan -> "
             "'Four Year Plan') into its own file so your real loc files are never touched.",
         ],
+        "example": "french   1,204 of 1,466 keys missing\ngerman     980 of 1,466 keys missing\n\n# counted against english, which every generator here writes first",
     },
     "validate": {
         "title": "Validate",
@@ -659,6 +876,7 @@ HELP = {
             "game), and 'oob' catches a starting division/fleet pointing at a province id the "
             "map never defines - that unit simply never deploys, with no error anywhere.",
         ],
+        "example": "error   focus     common/national_focus/tur.txt   focus 'tur_reform' has a\n                  prerequisite 'tur_missing' that no focus defines\n\n# severity | category | file | what is wrong. Double-click to open the line.",
     },
     "icon_coverage": {
         "title": "Icon Coverage",
@@ -672,7 +890,11 @@ HELP = {
             "A flagged reference means either the sprite name is misspelled, or the .gfx file "
             "registering it was never written - click a result to see exactly which file and "
             "line the reference comes from.",
+            "A flagged reference is not always a missing image: more often the image exists but "
+            "no .gfx file registers a sprite name for it, and the game only ever looks up the "
+            "name.",
         ],
+        "example": "MISSING  GFX_focus_tur_reform   common/national_focus/tur.txt:88\n\n# the focus asks for that sprite, and no .gfx file registers it -\n# in game this focus draws as an empty square",
     },
     "diff": {
         "title": "What Changed?",
@@ -683,7 +905,10 @@ HELP = {
             "Pick the two things to compare (current mod vs. a snapshot, or two folders).",
             "Changed files are listed with a line count of the diff; click one to see the "
             "actual added/removed lines side by side.",
+            "This compares raw text. For 'which focuses changed' rather than 'which lines "
+            "changed', use Tree Diff instead.",
         ],
+        "example": "common/national_focus/tur.txt      +12  -3\nlocalisation/english/tur_l_english.yml   +9  -0\n\n# added and removed lines per file; click one for the actual lines",
     },
     "replace": {
         "title": "Find & Replace",
@@ -706,6 +931,7 @@ HELP = {
             "(TUR_1936), and refuses to touch words that merely contain the letters (TURN, "
             "SOV_TUR_pact). A plain three-letter replace gets all of that wrong.",
         ],
+        "example": "Find:    add_political_power = 50\nReplace: add_political_power = 25\nMatches: 14 in 6 files\n\n# plain text, no token boundaries - use Refactor to rename an id safely",
     },
     "compat": {
         "title": "Compatibility",
@@ -726,22 +952,35 @@ HELP = {
             "and the game reports nothing when a mod asks for one that's gone - the effect just "
             "quietly does nothing, which is the most common way a working mod breaks.",
         ],
+        "example": "TAG      TUR   defined by both mods\nfocus    tur_reform   defined by both mods\nfile     common/countries/Turkey.txt   replaced by both\n\n# whichever mod loads last wins each of these, silently",
     },
     "error_log": {
-        "title": "Error Log",
-        "what": "Reads the game's own logs/error.log from your last play session - actual "
+        "title": "Test Play & Errors",
+        "what": "Starts the game with this mod and reads the game's own logs/error.log - actual "
                 "crashes, failed events, and script errors HOI4 itself reported while running, "
                 "not just what static file checks like Validate can predict in advance. Some "
                 "problems (a broken AI script, a bad targeted effect at runtime) only ever "
                 "surface here, because they depend on what actually happens during a playthrough.",
         "how": [
-            "Launch the mod in HOI4 and play for a bit (or just let it reach the main menu - "
-            "plenty of errors happen during game startup itself).",
-            "Come back here and click 'Read Log Now' - it reads the real log file from your "
-            "Documents/Paradox Interactive/Hearts of Iron IV/logs folder, not a copy.",
+            "Click 'Test Play'. The game loads mods from the launcher's mod folder rather than "
+            "from wherever you're editing, so if this mod hasn't been exported yet you're "
+            "offered to export it as a submod right there.",
+            "HOI4 starts in -debug mode with only this mod enabled, which is what makes it "
+            "report script errors at all. Whatever you had enabled before is restored the "
+            "moment the game quits.",
+            "Play for a bit (or just let it reach the main menu - plenty of errors happen "
+            "during game startup itself), then quit. The errors from that run appear here on "
+            "their own, with 'Only the last test run' already ticked.",
+            "'Read Log Now' re-reads the whole log instead, for a session you ran by hand - it "
+            "reads the real file from your Documents/Paradox Interactive/Hearts of Iron IV/logs "
+            "folder, not a copy.",
             "Check 'Only show errors touching this mod's files' to cut vanilla/base-game noise "
             "out entirely; a row highlighted green means the message references one of this "
             "mod's own script files by path.",
+            "Rows are collapsed by message with a 'times' count, because a real log is mostly "
+            "repetition - one install had 34,000 lines but only 738 distinct problems.",
+            "Double-click a green row to open that file in the Code screen at the exact line "
+            "the game complained about.",
             "Click a row to see a plain-language hint for common error patterns (e.g. 'No valid "
             "option for event' usually means every option's trigger failed, so the game had "
             "nothing to show the player).",
@@ -763,5 +1002,6 @@ HELP = {
             "The 'Collisions' tab lists every colliding pair and, when you select one, the exact "
             "ids/files both mods define - this never edits any mod, it's read-only analysis.",
         ],
+        "example": "1. Base game\n2. The Great War Redux      (loads first)\n3. My Submod                (loads last, so it wins)\n\n# a submod has to sit BELOW what it overrides or its files are ignored",
     },
 }
