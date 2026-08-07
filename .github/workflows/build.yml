@@ -1,0 +1,97 @@
+name: Build
+
+# Two jobs that do the same thing on the two platforms we ship, because
+# PyInstaller cannot cross-compile: a Linux binary has to be produced on
+# Linux and a Windows one on Windows.
+#
+# On a push or pull request this is a build check - it catches an import
+# that only resolves on one developer's machine, which a test run does not.
+# On a tag it also uploads both bundles to that tag's release, so cutting a
+# release no longer depends on having both operating systems to hand.
+
+on:
+  push:
+    branches: [master]
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y python3-tk xvfb
+          python -m pip install --upgrade pip
+          pip install pillow numpy
+      - name: Run the test suite
+        # several tests build real widgets, so they need a display; xvfb
+        # provides a headless one. Without it those tests skip themselves
+        # rather than fail, which would quietly check nothing.
+        run: xvfb-run -a python -m unittest discover -s tests -t tests
+
+  linux:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y python3-tk
+          python -m pip install --upgrade pip
+          pip install pyinstaller pillow numpy
+      - name: Build
+        run: python -m PyInstaller HOI4ModMaker-linux.spec --noconfirm
+      - name: Package
+        # tar, not zip: the bundle contains symlinks into pillow.libs and
+        # numpy.libs and relies on the executable bit, and a zip keeps
+        # neither
+        run: tar -czf HOI4ModMaker-linux-x86_64.tar.gz -C dist HOI4ModMaker
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux-build
+          path: HOI4ModMaker-linux-x86_64.tar.gz
+      - name: Attach to the release
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "${GITHUB_REF_NAME}" HOI4ModMaker-linux-x86_64.tar.gz --clobber
+
+  windows:
+    needs: test
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install pyinstaller pillow numpy
+      - name: Build
+        run: python -m PyInstaller HOI4ModMaker.spec --noconfirm
+      - name: Package
+        run: Compress-Archive -Path dist/HOI4ModMaker -DestinationPath HOI4ModMaker-windows.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-build
+          path: HOI4ModMaker-windows.zip
+      - name: Attach to the release
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "${env:GITHUB_REF_NAME}" HOI4ModMaker-windows.zip --clobber
