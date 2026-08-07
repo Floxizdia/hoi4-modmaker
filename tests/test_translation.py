@@ -1,6 +1,7 @@
 import os
 import tempfile
 import unittest
+from unittest import mock
 
 from app import loc_coverage, translation
 
@@ -76,6 +77,23 @@ class SaveTest(TranslationTestCase):
         self.assertEqual(names[-1], os.path.basename(
             translation.target_path(self.mod, "My Mod", "french")))
         self.assertEqual(loc_coverage.scan_language(self.mod, "french")["a"], "Un")
+
+    def test_merge_order_does_not_follow_the_filesystem(self):
+        """os.listdir has no defined order. NTFS hands back names sorted, so
+        the merge matched the game on Windows by luck and could disagree
+        with it on Linux, for the same mod.
+        """
+        self.write_lang("english", {"a": "One"})
+        self.write_lang("french", {"a": "One"}, filename="t_l_french.yml")
+        translation.save(self.mod, "My Mod", "french", {"a": "Un"})
+
+        folder = os.path.join(self.mod, "localisation", "french")
+        real_listdir = os.listdir
+        with mock.patch("os.listdir",
+                        lambda path: (list(reversed(real_listdir(path)))
+                                      if os.path.normcase(path) == os.path.normcase(folder)
+                                      else real_listdir(path))):
+            self.assertEqual(loc_coverage.scan_language(self.mod, "french")["a"], "Un")
 
     def test_a_second_save_keeps_the_first(self):
         self.write_lang("english", {"a": "One", "b": "Two"})

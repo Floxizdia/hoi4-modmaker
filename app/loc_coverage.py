@@ -26,12 +26,19 @@ def _lang_dir(mod_root, lang):
 
 
 def scan_language(mod_root, lang):
-    """{key: text} merged over every .yml under localisation/<lang>."""
+    """{key: text} merged over every .yml under localisation/<lang>.
+
+    Sorted, because a later file's definition of a key overwrites an
+    earlier one and the game resolves that clash by loading the folder
+    alphabetically. `os.listdir` has no defined order - on NTFS it comes
+    back alphabetical anyway, so this read the same as the game on Windows
+    and could disagree with it on Linux, for the same mod.
+    """
     out = {}
     folder = _lang_dir(mod_root, lang)
     if not os.path.isdir(folder):
         return out
-    for name in os.listdir(folder):
+    for name in sorted(os.listdir(folder)):
         if not name.lower().endswith(".yml"):
             continue
         path = os.path.join(folder, name)

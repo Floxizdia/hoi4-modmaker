@@ -30,7 +30,10 @@ def existing_group_ids(mod_root):
     folder = os.path.join(mod_root, "common", "ideologies")
     if not os.path.isdir(folder):
         return found
-    for fname in os.listdir(folder):
+    # sorted: both of these take the first file that matches, and
+    # os.listdir has no defined order - the answer would differ
+    # between Windows and Linux for the same mod
+    for fname in sorted(os.listdir(folder)):
         if not fname.endswith(".txt"):
             continue
         try:
@@ -51,7 +54,10 @@ def first_sub_ideology(mod_root, group_id):
     folder = os.path.join(mod_root, "common", "ideologies")
     if not os.path.isdir(folder):
         return None
-    for fname in os.listdir(folder):
+    # sorted: both of these take the first file that matches, and
+    # os.listdir has no defined order - the answer would differ
+    # between Windows and Linux for the same mod
+    for fname in sorted(os.listdir(folder)):
         if not fname.endswith(".txt"):
             continue
         try:
