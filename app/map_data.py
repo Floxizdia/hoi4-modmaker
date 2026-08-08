@@ -57,10 +57,48 @@ def _map_dir(mod_root):
 
 
 def _states_dir(mod_root):
+    """The folder a state file should be *written* into.
+
+    Reading is a different question - see `load_world_states`, which has to
+    merge both folders the way the game does.
+    """
     mod_states = os.path.join(mod_root, "history", "states")
     if os.path.isdir(mod_states) and glob.glob(os.path.join(mod_states, "*.txt")):
         return mod_states
     return os.path.join(BASE_GAME, "history", "states")
+
+
+def load_world_states(mod_root):
+    """Every state the game would have loaded for this mod.
+
+    The game does not choose between `history/states` folders - it loads the
+    base game's and then the mod's, and a mod file replaces the base file of
+    the same name. Reading only the mod's folder drops every state it didn't
+    happen to touch: Europe in Flames ships 449 state files of which 353
+    override a base one, so 581 base files and 578 states used to vanish and
+    all that land drew as unassigned.
+    """
+    base_dir = os.path.join(BASE_GAME, "history", "states")
+    mod_dir = os.path.join(mod_root, "history", "states") if mod_root else ""
+
+    if not mod_dir or not os.path.isdir(mod_dir):
+        return load_states(base_dir)
+    if os.path.abspath(mod_dir) == os.path.abspath(base_dir):
+        return load_states(mod_dir)
+
+    mod_files = {os.path.basename(p).lower()
+                 for p in glob.glob(os.path.join(mod_dir, "*.txt"))}
+    states = {}
+    if os.path.isdir(base_dir):
+        for sid, st in load_states(base_dir).items():
+            # skip the base file when the mod ships one by the same name;
+            # that is the file the game itself would have replaced
+            if os.path.basename(st["file"]).lower() not in mod_files:
+                states[sid] = st
+    # the mod's own states win outright, including on a state id that a
+    # differently-named base file also defines
+    states.update(load_states(mod_dir))
+    return states
 
 
 def load_definition(map_dir):
@@ -119,24 +157,15 @@ def unclaimed_land_provinces(mod_root):
     the raw material for building a brand new state from scratch."""
     map_dir = _map_dir(mod_root)
     land_ids = set(load_definition(map_dir).values())
-    states = load_states(_states_dir(mod_root))
+    # the merge that used to be spelled out here now lives in one place,
+    # because the map render needed exactly the same answer
+    states = load_world_states(mod_root)
     claimed = {pid for st in states.values() for pid in st["provinces"]}
-    # a mod's own states dir may only contain a handful of files (edited via
-    # this app) while still inheriting all the untouched base-game ones, so
-    # also fold in whichever base-game states aren't shadowed by the mod
-    if os.path.abspath(_states_dir(mod_root)) != os.path.abspath(os.path.join(BASE_GAME, "history", "states")):
-        base_states = load_states(os.path.join(BASE_GAME, "history", "states"))
-        mod_files = {os.path.basename(st["file"]) for st in states.values()}
-        for name, st in base_states.items():
-            if os.path.basename(st["file"]) not in mod_files:
-                claimed.update(st["provinces"])
     return sorted(land_ids - claimed - {0})
 
 
 def next_free_state_id(mod_root):
-    states = load_states(_states_dir(mod_root))
-    base_states = load_states(os.path.join(BASE_GAME, "history", "states"))
-    all_ids = set(states) | set(base_states)
+    all_ids = set(load_world_states(mod_root))
     return (max(all_ids) if all_ids else 0) + 1
 
 
@@ -166,7 +195,7 @@ class WorldMap:
 
         if progress:
             progress("Reading state files...")
-        self.states = load_states(_states_dir(mod_root))
+        self.states = load_world_states(mod_root)
         self.colors = load_country_colors(mod_root)
 
         prov_to_state = {}
